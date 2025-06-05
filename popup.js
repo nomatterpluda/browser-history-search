@@ -3,6 +3,7 @@ const searchInput = document.getElementById('searchInput');
 const loadingState = document.getElementById('loadingState');
 const resultsContainer = document.getElementById('resultsContainer');
 const noResults = document.getElementById('noResults');
+const extractButton = document.getElementById('extractButton');
 
 // State management
 let searchTimeout;
@@ -16,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add event listeners
     searchInput.addEventListener('input', handleSearchInput);
     searchInput.addEventListener('keydown', handleKeyDown);
+    extractButton.addEventListener('click', handleExtractContent);
     
     // Load recent history on startup
     loadRecentHistory();
@@ -187,5 +189,46 @@ function getRelativeDate(date) {
     } else {
         const months = Math.floor(diffDays / 30);
         return `${months} month${months > 1 ? 's' : ''} ago`;
+    }
+}
+
+// Handle extract content button click
+async function handleExtractContent() {
+    try {
+        extractButton.disabled = true;
+        extractButton.textContent = '⏳ Extracting...';
+        
+        // Get current active tab
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        
+        if (!tab) {
+            throw new Error('No active tab found');
+        }
+        
+        // Request content extraction from background script
+        const response = await chrome.runtime.sendMessage({
+            type: 'EXTRACT_CONTENT_FROM_TAB',
+            tabId: tab.id
+        });
+        
+        if (response.success) {
+            extractButton.textContent = '✅ Extracted!';
+            setTimeout(() => {
+                extractButton.textContent = '📄 Extract Current Page';
+                extractButton.disabled = false;
+            }, 2000);
+            
+            console.log('Content extracted successfully:', response.content);
+        } else {
+            throw new Error(response.error || 'Extraction failed');
+        }
+        
+    } catch (error) {
+        console.error('Error extracting content:', error);
+        extractButton.textContent = '❌ Failed';
+        setTimeout(() => {
+            extractButton.textContent = '📄 Extract Current Page';
+            extractButton.disabled = false;
+        }, 2000);
     }
 } 

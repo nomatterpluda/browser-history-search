@@ -70,6 +70,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
+        case 'CONTENT_EXTRACTED':
+            // Handle content extracted from pages
+            handleContentExtracted(message.content)
+                .then(() => sendResponse({ success: true }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'EXTRACT_CONTENT_FROM_TAB':
+            // Extract content from a specific tab
+            extractContentFromTab(message.tabId)
+                .then(content => sendResponse({ success: true, content }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
         case 'PING':
             // Health check endpoint
             sendResponse({ success: true, status: 'ready' });
@@ -283,6 +297,97 @@ async function updateSettings(newSettings) {
     } catch (error) {
         console.error('Error updating settings:', error);
         throw error;
+    }
+}
+
+// Content extraction and processing
+async function handleContentExtracted(extractedContent) {
+    try {
+        console.log('Processing extracted content:', extractedContent.url);
+        
+        // Store the extracted content for future processing
+        await storeExtractedContent(extractedContent);
+        
+        // TODO: Generate embeddings in Step 7
+        console.log('Content stored, embeddings generation will be implemented in Step 7');
+        
+    } catch (error) {
+        console.error('Error handling extracted content:', error);
+        throw error;
+    }
+}
+
+// Store extracted content in local storage
+async function storeExtractedContent(content) {
+    try {
+        const storageKey = `content_${content.url}`;
+        const contentData = {
+            ...content,
+            storedAt: new Date().toISOString(),
+            processed: false // Will be true after embeddings are generated
+        };
+        
+        await chrome.storage.local.set({ [storageKey]: contentData });
+        
+        // Update stats
+        const stats = await getStats();
+        stats.totalPages = (stats.totalPages || 0) + 1;
+        stats.lastUpdate = new Date().toISOString();
+        await chrome.storage.local.set({ stats });
+        
+        console.log('Content stored for URL:', content.url);
+        
+    } catch (error) {
+        console.error('Error storing extracted content:', error);
+        throw error;
+    }
+}
+
+// Extract content from a specific tab
+async function extractContentFromTab(tabId) {
+    try {
+        const response = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_CONTENT' });
+        
+        if (response.success) {
+            await handleContentExtracted(response.content);
+            return response.content;
+        } else {
+            throw new Error(response.reason || 'Content extraction failed');
+        }
+        
+    } catch (error) {
+        console.error('Error extracting content from tab:', error);
+        throw error;
+    }
+}
+
+// Get stored statistics
+async function getStats() {
+    try {
+        const result = await chrome.storage.local.get(['stats']);
+        return result.stats || { totalPages: 0, lastUpdate: null };
+    } catch (error) {
+        console.error('Error getting stats:', error);
+        return { totalPages: 0, lastUpdate: null };
+    }
+}
+
+// Get all stored content (for debugging/management)
+async function getAllStoredContent() {
+    try {
+        const allData = await chrome.storage.local.get(null);
+        const contentItems = {};
+        
+        Object.keys(allData).forEach(key => {
+            if (key.startsWith('content_')) {
+                contentItems[key] = allData[key];
+            }
+        });
+        
+        return contentItems;
+    } catch (error) {
+        console.error('Error getting stored content:', error);
+        return {};
     }
 }
 

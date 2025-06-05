@@ -31,6 +31,29 @@ body {
     margin-bottom: 20px;
 }
 
+.extract-button {
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px 12px;
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.extract-button:hover {
+    background-color: #e8f0fe;
+    border-color: #1a73e8;
+}
+
+.extract-button:disabled {
+    background-color: #f1f3f4;
+    color: #9aa0a6;
+    cursor: not-allowed;
+}
+
 #searchInput {
     width: 100%;
     padding: 12px 16px;
