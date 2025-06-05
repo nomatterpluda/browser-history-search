@@ -133,7 +133,7 @@ function createResultElement(result) {
         <div class="result-title">${escapeHtml(result.title)}</div>
         <div class="result-snippet">${escapeHtml(result.snippet)}</div>
         <div class="result-meta">
-            <img class="result-favicon" src="${result.favicon}" alt="favicon">
+            <img class="result-favicon" src="${result.favicon}" alt="favicon" onerror="this.style.display='none'">
             <span>${relativeDate}</span>
         </div>
     `;

@@ -186,10 +186,43 @@ function formatHistoryItem(historyItem) {
         url: historyItem.url,
         snippet: generateSnippet(historyItem),
         visitDate: visitDate.toISOString(),
-        favicon: `chrome://favicon/${historyItem.url}`,
+        favicon: getFaviconUrl(historyItem.url),
         visitCount: historyItem.visitCount || 1,
         relevanceScore: calculateRelevanceScore(historyItem)
     };
+}
+
+// Get favicon URL with fallback
+function getFaviconUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname;
+        
+        // Use Google's favicon service as it's more reliable
+        return `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+    } catch (error) {
+        // Fallback to a generic icon
+        return generateGenericFavicon(url);
+    }
+}
+
+// Generate a simple generic favicon
+function generateGenericFavicon(url) {
+    try {
+        const urlObj = new URL(url);
+        const firstLetter = urlObj.hostname.charAt(0).toUpperCase();
+        
+        // Create a simple SVG favicon with the first letter of the domain
+        const svg = `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+            <rect width="16" height="16" fill="#1a73e8"/>
+            <text x="8" y="12" font-family="Arial, sans-serif" font-size="10" fill="white" text-anchor="middle">${firstLetter}</text>
+        </svg>`;
+        
+        return `data:image/svg+xml;base64,${btoa(svg)}`;
+    } catch (error) {
+        // Ultimate fallback - a simple blue square
+        return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBmaWxsPSIjMWE3M2U4Ii8+Cjx0ZXh0IHg9IjgiIHk9IjEyIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn4yQPC90ZXh0Pgo8L3N2Zz4K';
+    }
 }
 
 // Generate snippet from URL and title

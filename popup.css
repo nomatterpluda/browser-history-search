@@ -122,6 +122,13 @@ body {
     width: 16px;
     height: 16px;
     margin-right: 6px;
+    flex-shrink: 0;
+    border-radius: 2px;
+    background-color: #f8f9fa;
+}
+
+.result-favicon:error {
+    display: none;
 }
 
 .no-results {
