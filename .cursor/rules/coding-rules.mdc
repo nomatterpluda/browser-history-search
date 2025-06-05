@@ -1,0 +1,100 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Coding Pattern Preferences
+
+Always prefer simple solutions
+Avoid duplication of code whenever possible, which means checking for other areas of the codebase that might already have similar code and functionality
+Write code that takes into account the different environments: dev, test, and prod
+You are careful to only make changes that are requested or you are confident are well understood and related to the change being requested
+When fixing an issue or bug, do not introduce a new pattern or technology without first exhausting all options for the existing implementation. And if you finally do this, make sure to remove the old implementation afterwards so we don't have duplicate logic.
+Keep the codebase very clean and organized
+Avoid writing scripts in files if possible, especially if the script is likely only to be run once
+Avoid having files over 200-300 lines of code. Refactor at that point.
+Mocking data is only needed for tests, never mock data for dev or prod
+Never add stubbing or fake data patterns to code that affects the dev or prod environments
+Never overwrite my env file without first asking and confirming
+
+Coding Workflow Preferences
+
+Focus on the areas of code relevant to the task
+Do not touch code that is unrelated to the task
+Write thorough tests for all major functionality
+Avoid making major changes to the patterns and architecture of how a feature works, after it has shown to work well, unless explicitly instructed
+Always think about what other methods and areas of code might be affected by code changes
+Before writing code, show me: 1. Which files you'll modify 2. What the main changes will be 3. Any potential risks or dependencies Then I'll tell you to proceed.
+After completing a feature, add comments to explain: What this function does, What parameters it expects, What it returns, Any gotchas or edge cases
+
+Chrome Extension Specific Rules
+
+Always use Manifest V3 format and APIs
+Never use localStorage or sessionStorage - use Chrome Storage API instead
+Respect Chrome extension permissions - only request what's needed
+Always test extension functionality after changes by reloading in Chrome
+Handle Chrome API errors gracefully with proper try-catch blocks
+Use content scripts only when necessary - prefer background/popup scripts when possible
+Keep popup.html lightweight - avoid heavy processing in popup context
+
+API Integration Safety
+
+Always implement proper error handling for external API calls (OpenAI, etc.)
+Include retry logic with exponential backoff for API failures
+Never expose API keys in client-side code - use environment variables or secure storage
+Implement rate limiting to avoid exceeding API quotas
+Cache API responses when appropriate to minimize costs and improve performance
+Always validate API responses before using the data
+
+Data Management Rules
+
+Use IndexedDB for large datasets, Chrome Storage for small config data
+Implement data cleanup/retention policies to prevent unlimited storage growth
+Always validate data before storing or processing
+Handle storage quota exceeded errors gracefully
+Encrypt sensitive data before storing locally
+Never store user's browsing data in plain text - always process and anonymize
+
+Error Handling & Debugging
+
+Add comprehensive error handling for all async operations
+Use descriptive error messages that help diagnose issues
+Implement graceful degradation when features fail
+Add console.log statements during development but remove them before production
+Always handle edge cases like empty data, network failures, and permission denials
+Test error scenarios, not just happy paths
+
+Performance & Security
+
+Debounce user input (search queries) to avoid excessive API calls
+Use web workers for heavy processing when possible
+Implement proper CSP (Content Security Policy) headers
+Sanitize all user inputs and external data
+Minimize memory usage - clean up event listeners and references
+Optimize for extension startup time - lazy load heavy features
+
+Git & Version Control
+
+Never commit API keys, secrets, or sensitive configuration
+Make small, focused commits with descriptive messages
+Always test the extension after changes before committing
+Tag stable releases for easy rollback
+Keep the repository clean - use .gitignore appropriately
+
+User Experience Rules
+
+Always provide loading states for async operations
+Show clear error messages to users when things fail
+Implement proper keyboard navigation and accessibility
+Keep the UI responsive - never block the main thread
+Provide visual feedback for all user actions
+Handle cases where users have no browsing history or data
+
+Development Process
+
+Complete one feature fully before starting another
+Test each feature immediately after implementation
+Revert changes immediately if they break existing functionality
+Ask for clarification before making assumptions about requirements
+Suggest simpler alternatives when complex solutions are proposed
+Always consider the impact on existing users and data migration needs

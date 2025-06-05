@@ -1,0 +1,12 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+use this tech stack:
+
+Frontend: JavaScript/TypeScript
+Browser APIs: Chrome Extensions API, Chrome History API
+Storage: Chrome Local Storage + IndexedDB for larger datasets
+AI Service: ChatGPT/OpenAI Embeddings API
+Preview System: Dynamic iframe loading or cached screenshots
