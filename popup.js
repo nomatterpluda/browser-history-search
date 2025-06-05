@@ -4,6 +4,7 @@ const loadingState = document.getElementById('loadingState');
 const resultsContainer = document.getElementById('resultsContainer');
 const noResults = document.getElementById('noResults');
 const extractButton = document.getElementById('extractButton');
+const statsButton = document.getElementById('statsButton');
 
 // State management
 let searchTimeout;
@@ -18,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     searchInput.addEventListener('input', handleSearchInput);
     searchInput.addEventListener('keydown', handleKeyDown);
     extractButton.addEventListener('click', handleExtractContent);
+    statsButton.addEventListener('click', showStats);
     
     // Load recent history on startup
     loadRecentHistory();
@@ -230,5 +232,29 @@ async function handleExtractContent() {
             extractButton.textContent = '📄 Extract Current Page';
             extractButton.disabled = false;
         }, 2000);
+    }
+}
+
+// Show extraction statistics
+async function showStats() {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'GET_STATS'
+        });
+        
+        if (response.success) {
+            const stats = response.stats;
+            alert(`📊 Extraction Statistics:
+            
+📄 Pages Processed: ${stats.totalPages || 0}
+📅 Last Update: ${stats.lastUpdate ? new Date(stats.lastUpdate).toLocaleString() : 'Never'}
+
+The extension is working! Content is being extracted and stored for future semantic search.`);
+        } else {
+            alert('❌ Could not load statistics');
+        }
+    } catch (error) {
+        console.error('Error getting stats:', error);
+        alert('❌ Error loading statistics');
     }
 } 

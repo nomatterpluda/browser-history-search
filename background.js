@@ -64,6 +64,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
+        case 'GET_STATS':
+            getStats()
+                .then(stats => sendResponse({ success: true, stats }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
         case 'UPDATE_SETTINGS':
             updateSettings(message.settings)
                 .then(() => sendResponse({ success: true }))
