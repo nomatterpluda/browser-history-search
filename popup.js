@@ -16,7 +16,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add event listeners
     searchInput.addEventListener('input', handleSearchInput);
     searchInput.addEventListener('keydown', handleKeyDown);
+    
+    // Load recent history on startup
+    loadRecentHistory();
 });
+
+// Load recent history items
+async function loadRecentHistory() {
+    try {
+        showLoadingState();
+        
+        const response = await chrome.runtime.sendMessage({
+            type: 'SEARCH_HISTORY',
+            query: '' // Empty query returns recent items
+        });
+        
+        if (response.success && response.results.length > 0) {
+            displayResults(response.results);
+        } else {
+            hideAllStates();
+        }
+        
+    } catch (error) {
+        console.error('Error loading recent history:', error);
+        hideAllStates();
+    }
+}
 
 // Handle search input with debouncing
 function handleSearchInput(event) {
@@ -51,29 +76,25 @@ function handleKeyDown(event) {
     }
 }
 
-// Perform search (placeholder implementation)
+// Perform search using background script
 async function performSearch(query) {
     console.log('Searching for:', query);
     
     showLoadingState();
     
     try {
-        // TODO: Implement actual search functionality
-        // For now, simulate search delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Send search request to background script
+        const response = await chrome.runtime.sendMessage({
+            type: 'SEARCH_HISTORY',
+            query: query
+        });
         
-        // Placeholder results
-        const mockResults = [
-            {
-                title: 'Example Search Result',
-                snippet: 'This is a placeholder result for the search query: ' + query,
-                url: 'https://example.com',
-                visitDate: new Date().toISOString(),
-                favicon: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBmaWxsPSIjMUE3M0U4Ii8+Cjx0ZXh0IHg9IjgiIHk9IjEyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5FPC90ZXh0Pgo8L3N2Zz4K'
-            }
-        ];
-        
-        displayResults(mockResults);
+        if (response.success) {
+            displayResults(response.results);
+        } else {
+            console.error('Search failed:', response.error);
+            showNoResults();
+        }
         
     } catch (error) {
         console.error('Search error:', error);
