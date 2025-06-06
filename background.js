@@ -1,8 +1,239 @@
 // Background script for Browser History Search extension
 console.log('Browser History Search background script loaded');
 
-// Import configuration and services
-importScripts('config.js', 'openai-service.js');
+// Configuration constants (inlined for compatibility)
+const OPENAI_CONFIG = {
+    apiUrl: 'https://api.openai.com/v1/embeddings',
+    model: 'text-embedding-ada-002',
+    maxTokens: 8191,
+    batchSize: 10,
+    rateLimitDelay: 1000,
+    maxRetries: 3
+};
+
+const CONTENT_CONFIG = {
+    maxContentLength: 5000,
+    minContentLength: 50,
+    chunkSize: 3000,
+    overlapSize: 200
+};
+
+const STORAGE_CONFIG = {
+    embeddingsPrefix: 'embeddings_',
+    contentPrefix: 'content_',
+    settingsKey: 'settings',
+    statsKey: 'stats',
+    maxStorageItems: 1000
+};
+
+const SEARCH_CONFIG = {
+    similarityThreshold: 0.7,
+    maxResults: 10,
+    boostRecentPages: true,
+    recencyBoostFactor: 0.1
+};
+
+// OpenAI Service (simplified for background script)
+class OpenAIService {
+    constructor() {
+        this.apiKey = null;
+        this.isInitialized = false;
+    }
+
+    async initialize() {
+        try {
+            const settings = await this.getSettings();
+            this.apiKey = settings.openaiApiKey;
+            
+            if (!this.apiKey) {
+                console.warn('OpenAI API key not configured');
+                return false;
+            }
+            
+            this.isInitialized = true;
+            console.log('OpenAI service initialized');
+            return true;
+            
+        } catch (error) {
+            console.error('Error initializing OpenAI service:', error);
+            return false;
+        }
+    }
+
+    async setApiKey(apiKey) {
+        try {
+            if (!apiKey || typeof apiKey !== 'string') {
+                throw new Error('Invalid API key');
+            }
+
+            const testResult = await this.testApiKey(apiKey);
+            if (!testResult.success) {
+                throw new Error(testResult.error);
+            }
+
+            const settings = await this.getSettings();
+            settings.openaiApiKey = apiKey;
+            await this.saveSettings(settings);
+            
+            this.apiKey = apiKey;
+            this.isInitialized = true;
+            
+            return { success: true };
+            
+        } catch (error) {
+            console.error('Error setting API key:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async testApiKey(apiKey) {
+        try {
+            const response = await fetch(OPENAI_CONFIG.apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: OPENAI_CONFIG.model,
+                    input: 'test'
+                })
+            });
+
+            if (response.ok) {
+                return { success: true };
+            } else {
+                const errorData = await response.json();
+                return { 
+                    success: false, 
+                    error: errorData.error?.message || 'API key validation failed' 
+                };
+            }
+            
+        } catch (error) {
+            return { 
+                success: false, 
+                error: 'Network error during API key validation' 
+            };
+        }
+    }
+
+    async generateEmbeddings(text) {
+        if (!this.isInitialized || !this.apiKey) {
+            throw new Error('OpenAI service not initialized or API key missing');
+        }
+
+        if (!text || text.trim().length === 0) {
+            throw new Error('Text content is required');
+        }
+
+        const truncatedText = this.truncateText(text);
+        
+        try {
+            const response = await this.makeApiRequest({
+                model: OPENAI_CONFIG.model,
+                input: truncatedText
+            });
+
+            if (response.data && response.data.length > 0) {
+                return {
+                    success: true,
+                    embedding: response.data[0].embedding,
+                    tokens: response.usage?.total_tokens || 0
+                };
+            } else {
+                throw new Error('No embedding data received');
+            }
+            
+        } catch (error) {
+            console.error('Error generating embeddings:', error);
+            throw error;
+        }
+    }
+
+    async makeApiRequest(payload, retryCount = 0) {
+        try {
+            const response = await fetch(OPENAI_CONFIG.apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                
+                if (response.status === 429 && retryCount < OPENAI_CONFIG.maxRetries) {
+                    const retryDelay = Math.pow(2, retryCount) * 1000;
+                    console.log(`Rate limited, retrying in ${retryDelay}ms...`);
+                    await this.delay(retryDelay);
+                    return this.makeApiRequest(payload, retryCount + 1);
+                }
+                
+                throw new Error(errorData.error?.message || `API request failed: ${response.status}`);
+            }
+
+            return await response.json();
+            
+        } catch (error) {
+            if (retryCount < OPENAI_CONFIG.maxRetries) {
+                console.log(`Request failed, retrying... (${retryCount + 1}/${OPENAI_CONFIG.maxRetries})`);
+                await this.delay(1000 * (retryCount + 1));
+                return this.makeApiRequest(payload, retryCount + 1);
+            }
+            throw error;
+        }
+    }
+
+    truncateText(text) {
+        if (text.length <= CONTENT_CONFIG.maxContentLength) {
+            return text;
+        }
+        return text.substring(0, CONTENT_CONFIG.maxContentLength) + '...';
+    }
+
+    async delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async getSettings() {
+        try {
+            const result = await chrome.storage.local.get([STORAGE_CONFIG.settingsKey]);
+            return result[STORAGE_CONFIG.settingsKey] || {};
+        } catch (error) {
+            console.error('Error getting settings:', error);
+            return {};
+        }
+    }
+
+    async saveSettings(settings) {
+        try {
+            await chrome.storage.local.set({ [STORAGE_CONFIG.settingsKey]: settings });
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            throw error;
+        }
+    }
+
+    isReady() {
+        return this.isInitialized && this.apiKey;
+    }
+
+    getUsageStats() {
+        return {
+            isConfigured: !!this.apiKey,
+            isReady: this.isReady()
+        };
+    }
+}
+
+// Create singleton instance
+const openAIService = new OpenAIService();
+
+// Auto-initialize when script loads
+openAIService.initialize().catch(console.error);
 
 // Extension installation handler
 chrome.runtime.onInstalled.addListener((details) => {
