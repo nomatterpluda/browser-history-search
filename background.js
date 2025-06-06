@@ -569,7 +569,12 @@ async function handleContentExtracted(extractedContent) {
         
         // Generate embeddings if OpenAI is configured
         if (openAIService.isReady()) {
-            await generateEmbeddingsForStoredContent(extractedContent.url);
+            try {
+                await generateEmbeddingsForStoredContent(extractedContent.url);
+            } catch (error) {
+                console.warn('Embeddings generation failed, continuing without:', error.message);
+                // Continue without embeddings - the extension will still work with text search
+            }
         } else {
             console.log('OpenAI not configured, skipping embeddings generation');
         }
