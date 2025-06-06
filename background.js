@@ -1,6 +1,9 @@
 // Background script for Browser History Search extension
 console.log('Browser History Search background script loaded');
 
+// Import configuration and services
+importScripts('config.js', 'openai-service.js');
+
 // Extension installation handler
 chrome.runtime.onInstalled.addListener((details) => {
     console.log('Extension installed:', details.reason);
@@ -67,6 +70,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'GET_STATS':
             getStats()
                 .then(stats => sendResponse({ success: true, stats }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'SET_OPENAI_API_KEY':
+            openAIService.setApiKey(message.apiKey)
+                .then(result => sendResponse(result))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'GET_OPENAI_STATUS':
+            sendResponse({ 
+                success: true, 
+                status: openAIService.getUsageStats() 
+            });
+            break;
+            
+        case 'GENERATE_EMBEDDINGS':
+            generateEmbeddingsForContent(message.contentId)
+                .then(result => sendResponse({ success: true, result }))
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
@@ -314,8 +336,12 @@ async function handleContentExtracted(extractedContent) {
         // Store the extracted content for future processing
         await storeExtractedContent(extractedContent);
         
-        // TODO: Generate embeddings in Step 7
-        console.log('Content stored, embeddings generation will be implemented in Step 7');
+        // Generate embeddings if OpenAI is configured
+        if (openAIService.isReady()) {
+            await generateEmbeddingsForStoredContent(extractedContent.url);
+        } else {
+            console.log('OpenAI not configured, skipping embeddings generation');
+        }
         
     } catch (error) {
         console.error('Error handling extracted content:', error);
@@ -395,6 +421,104 @@ async function getAllStoredContent() {
         console.error('Error getting stored content:', error);
         return {};
     }
+}
+
+// OpenAI Embeddings Functions
+async function generateEmbeddingsForStoredContent(url) {
+    try {
+        const contentKey = `content_${url}`;
+        const result = await chrome.storage.local.get([contentKey]);
+        const contentData = result[contentKey];
+        
+        if (!contentData) {
+            throw new Error('Content not found for URL: ' + url);
+        }
+        
+        console.log('Generating embeddings for:', url);
+        
+        const embeddingResult = await openAIService.generateEmbeddings(contentData.content);
+        
+        if (embeddingResult.success) {
+            // Store the embedding
+            const embeddingKey = `embeddings_${url}`;
+            const embeddingData = {
+                url: url,
+                embedding: embeddingResult.embedding,
+                tokens: embeddingResult.tokens,
+                generatedAt: new Date().toISOString(),
+                contentLength: contentData.content.length
+            };
+            
+            await chrome.storage.local.set({ [embeddingKey]: embeddingData });
+            
+            // Mark content as processed
+            contentData.processed = true;
+            contentData.embeddingGeneratedAt = new Date().toISOString();
+            await chrome.storage.local.set({ [contentKey]: contentData });
+            
+            console.log('Embeddings generated and stored for:', url);
+            return embeddingData;
+        } else {
+            throw new Error('Failed to generate embeddings');
+        }
+        
+    } catch (error) {
+        console.error('Error generating embeddings for content:', error);
+        throw error;
+    }
+}
+
+async function generateEmbeddingsForContent(contentId) {
+    try {
+        // This function can be called manually for specific content
+        const url = contentId.replace('content_', '');
+        return await generateEmbeddingsForStoredContent(url);
+    } catch (error) {
+        console.error('Error in generateEmbeddingsForContent:', error);
+        throw error;
+    }
+}
+
+// Get all stored embeddings
+async function getAllEmbeddings() {
+    try {
+        const allData = await chrome.storage.local.get(null);
+        const embeddings = {};
+        
+        Object.keys(allData).forEach(key => {
+            if (key.startsWith('embeddings_')) {
+                embeddings[key] = allData[key];
+            }
+        });
+        
+        return embeddings;
+    } catch (error) {
+        console.error('Error getting embeddings:', error);
+        return {};
+    }
+}
+
+// Calculate cosine similarity between two vectors
+function cosineSimilarity(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length) {
+        return 0;
+    }
+    
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    
+    if (normA === 0 || normB === 0) {
+        return 0;
+    }
+    
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
 // Error handling for unhandled promise rejections

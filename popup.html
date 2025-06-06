@@ -25,6 +25,9 @@
             <button id="statsButton" class="stats-button" title="View extraction statistics">
                 📊 View Stats
             </button>
+            <button id="settingsButton" class="settings-button" title="Configure OpenAI API">
+                ⚙️ Settings
+            </button>
         </div>
         
         <div class="results-section">
@@ -39,6 +42,32 @@
             
             <div id="noResults" class="no-results hidden">
                 <p>No results found. Try a different search term.</p>
+            </div>
+        </div>
+        
+        <!-- Settings Modal -->
+        <div id="settingsModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>⚙️ Extension Settings</h2>
+                    <button id="closeModal" class="close-button">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <label for="apiKeyInput">OpenAI API Key:</label>
+                        <input type="password" id="apiKeyInput" placeholder="sk-..." />
+                        <small>Required for semantic search. Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI</a></small>
+                    </div>
+                    <div class="setting-group">
+                        <div id="apiStatus" class="api-status">
+                            <span id="statusText">Not configured</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveSettings" class="save-button">💾 Save Settings</button>
+                    <button id="testApi" class="test-button">🧪 Test API Key</button>
+                </div>
             </div>
         </div>
     </div>
