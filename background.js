@@ -343,6 +343,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
+        case 'GET_CURRENT_TAB_ID':
+            // Get current tab ID for screenshot capture
+            chrome.tabs.query({ active: true, currentWindow: true })
+                .then(tabs => {
+                    const tabId = tabs.length > 0 ? tabs[0].id : null;
+                    sendResponse({ success: true, tabId });
+                })
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'GET_STORED_CONTENT':
+            // Get stored content for a URL
+            getStoredContentForUrl(message.url)
+                .then(content => sendResponse({ success: true, content }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
         case 'PING':
             // Health check endpoint
             sendResponse({ success: true, status: 'ready' });
@@ -564,6 +581,19 @@ async function handleContentExtracted(extractedContent) {
     try {
         console.log('Processing extracted content:', extractedContent.url);
         
+        // Try to capture screenshot if tabId is available
+        if (extractedContent.tabId) {
+            try {
+                const screenshot = await capturePageScreenshot(extractedContent.tabId);
+                if (screenshot) {
+                    extractedContent.screenshot = screenshot;
+                    console.log('Screenshot captured for:', extractedContent.url);
+                }
+            } catch (screenshotError) {
+                console.log('Could not capture screenshot:', screenshotError.message);
+            }
+        }
+        
         // Store the extracted content for future processing
         await storeExtractedContent(extractedContent);
         
@@ -604,6 +634,9 @@ async function storeExtractedContent(content) {
         await chrome.storage.local.set({ stats });
         
         console.log('Content stored for URL:', content.url);
+        
+        // Clean up old content if we have too many items
+        await cleanupOldContent();
         
     } catch (error) {
         console.error('Error storing extracted content:', error);
@@ -679,6 +712,89 @@ function isValidUrlForContentScript(url) {
     return !invalidPatterns.some(pattern => pattern.test(url));
 }
 
+// Capture screenshot of a tab
+async function capturePageScreenshot(tabId) {
+    try {
+        // Make sure the tab is active and visible
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab || tab.status !== 'complete') {
+            throw new Error('Tab not ready for screenshot');
+        }
+        
+        // Wait a bit more for dynamic content to load
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Double-check tab is still complete
+        const updatedTab = await chrome.tabs.get(tabId);
+        if (!updatedTab || updatedTab.status !== 'complete') {
+            throw new Error('Tab status changed during wait');
+        }
+        
+        // Capture visible tab with higher quality
+        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+            format: 'jpeg',
+            quality: 60  // Lower quality to reduce file size
+        });
+        
+        // Convert to smaller thumbnail for storage efficiency
+        const thumbnail = await createThumbnail(dataUrl, 250, 200);
+        return thumbnail;
+        
+    } catch (error) {
+        console.error('Error capturing screenshot:', error);
+        return null;
+    }
+}
+
+// Create thumbnail from full screenshot
+async function createThumbnail(dataUrl, maxWidth, maxHeight) {
+    try {
+        // Use OffscreenCanvas which is available in service workers
+        const canvas = new OffscreenCanvas(maxWidth, maxHeight);
+        const ctx = canvas.getContext('2d');
+        
+        // Convert data URL to ImageBitmap (works in service workers)
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        const imageBitmap = await createImageBitmap(blob);
+        
+        // Calculate scaling to fit within bounds while maintaining aspect ratio
+        const scale = Math.min(maxWidth / imageBitmap.width, maxHeight / imageBitmap.height);
+        const scaledWidth = imageBitmap.width * scale;
+        const scaledHeight = imageBitmap.height * scale;
+        
+        // Center the image
+        const x = (maxWidth - scaledWidth) / 2;
+        const y = (maxHeight - scaledHeight) / 2;
+        
+        // Fill background
+        ctx.fillStyle = '#f8f9fa';
+        ctx.fillRect(0, 0, maxWidth, maxHeight);
+        
+        // Draw scaled image
+        ctx.drawImage(imageBitmap, x, y, scaledWidth, scaledHeight);
+        
+        // Convert to blob and then to data URL
+        const thumbnailBlob = await canvas.convertToBlob({ 
+            type: 'image/jpeg', 
+            quality: 0.7 
+        });
+        
+        // Convert blob to data URL
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(thumbnailBlob);
+        });
+        
+    } catch (error) {
+        console.error('Error creating thumbnail:', error);
+        // Fallback: return original but warn about size
+        console.warn('Using full-size image - storage may be impacted');
+        return dataUrl;
+    }
+}
+
 // Get stored statistics
 async function getStats() {
     try {
@@ -687,6 +803,64 @@ async function getStats() {
     } catch (error) {
         console.error('Error getting stats:', error);
         return { totalPages: 0, lastUpdate: null };
+    }
+}
+
+// Clean up old content to prevent unlimited storage growth
+async function cleanupOldContent() {
+    try {
+        const allData = await chrome.storage.local.get(null);
+        const contentItems = [];
+        
+        // Collect all content items with timestamps
+        Object.keys(allData).forEach(key => {
+            if (key.startsWith('content_')) {
+                const item = allData[key];
+                if (item && item.storedAt) {
+                    contentItems.push({
+                        key: key,
+                        storedAt: new Date(item.storedAt),
+                        hasScreenshot: !!item.screenshot
+                    });
+                }
+            }
+        });
+        
+        // Keep only the 100 most recent items
+        const maxItems = 100;
+        if (contentItems.length > maxItems) {
+            // Sort by date (newest first)
+            contentItems.sort((a, b) => b.storedAt - a.storedAt);
+            
+            // Remove oldest items
+            const itemsToRemove = contentItems.slice(maxItems);
+            const keysToRemove = itemsToRemove.map(item => item.key);
+            
+            // Also remove corresponding embeddings
+            const embeddingKeysToRemove = itemsToRemove.map(item => 
+                item.key.replace('content_', 'embeddings_')
+            );
+            
+            const allKeysToRemove = [...keysToRemove, ...embeddingKeysToRemove];
+            await chrome.storage.local.remove(allKeysToRemove);
+            
+            console.log(`Cleaned up ${itemsToRemove.length} old content items`);
+        }
+        
+    } catch (error) {
+        console.error('Error cleaning up old content:', error);
+    }
+}
+
+// Get stored content for a specific URL
+async function getStoredContentForUrl(url) {
+    try {
+        const contentKey = `content_${url}`;
+        const result = await chrome.storage.local.get([contentKey]);
+        return result[contentKey] || null;
+    } catch (error) {
+        console.error('Error getting stored content for URL:', error);
+        return null;
     }
 }
 

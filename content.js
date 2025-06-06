@@ -189,12 +189,29 @@ function autoExtractContent() {
     
     const extractedContent = extractPageContent();
     if (extractedContent) {
-        // Send to background script for processing
+        // Get current tab ID and add it to content
         chrome.runtime.sendMessage({
-            type: 'CONTENT_EXTRACTED',
-            content: extractedContent
+            type: 'GET_CURRENT_TAB_ID'
+        }).then(response => {
+            if (response && response.tabId) {
+                extractedContent.tabId = response.tabId;
+            }
+            
+            // Send to background script for processing
+            chrome.runtime.sendMessage({
+                type: 'CONTENT_EXTRACTED',
+                content: extractedContent
+            }).catch(error => {
+                console.log('Background script not ready, content extraction skipped');
+            });
         }).catch(error => {
-            console.log('Background script not ready, content extraction skipped');
+            // Send without tabId if we can't get it
+            chrome.runtime.sendMessage({
+                type: 'CONTENT_EXTRACTED',
+                content: extractedContent
+            }).catch(error => {
+                console.log('Background script not ready, content extraction skipped');
+            });
         });
     }
 }

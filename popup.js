@@ -13,6 +13,10 @@ const saveSettings = document.getElementById('saveSettings');
 const testApi = document.getElementById('testApi');
 const apiStatus = document.getElementById('apiStatus');
 const statusText = document.getElementById('statusText');
+const previewContainer = document.getElementById('previewContainer');
+const previewHeader = document.getElementById('previewHeader');
+const previewContent = document.getElementById('previewContent');
+const previewLoading = document.getElementById('previewLoading');
 
 // State management
 let searchTimeout;
@@ -37,6 +41,14 @@ document.addEventListener('DOMContentLoaded', () => {
     settingsModal.addEventListener('click', (e) => {
         if (e.target === settingsModal) {
             closeSettings();
+        }
+    });
+    
+    // Hide preview when scrolling or clicking elsewhere
+    document.addEventListener('scroll', hidePreview);
+    document.addEventListener('click', (e) => {
+        if (!previewContainer.contains(e.target) && !e.target.closest('.result-item')) {
+            hidePreview();
         }
     });
     
@@ -167,7 +179,267 @@ function createResultElement(result) {
         window.close();
     });
     
+    // Add hover preview functionality
+    let hoverTimeout;
+    
+    resultDiv.addEventListener('mouseenter', (e) => {
+        // Clear any existing timeout
+        if (hoverTimeout) {
+            clearTimeout(hoverTimeout);
+        }
+        
+        // Set delay before showing preview (300ms as per PRD)
+        hoverTimeout = setTimeout(() => {
+            showPreview(result, resultDiv);
+        }, 300);
+    });
+    
+    resultDiv.addEventListener('mouseleave', () => {
+        // Clear timeout if mouse leaves before preview shows
+        if (hoverTimeout) {
+            clearTimeout(hoverTimeout);
+            hoverTimeout = null;
+        }
+        hidePreview();
+    });
+    
     return resultDiv;
+}
+
+// Preview functionality
+let currentPreviewTimeout;
+
+function showPreview(result, resultElement) {
+    // Test if preview container exists
+    if (!previewContainer) {
+        console.error('Preview container not found!');
+        return;
+    }
+    
+    // Check if element still exists
+    if (!resultElement || !resultElement.getBoundingClientRect) {
+        console.error('Invalid result element for preview');
+        return;
+    }
+    
+    // Position preview to the right of the result item
+    const rect = resultElement.getBoundingClientRect();
+    const popupRect = document.body.getBoundingClientRect();
+    
+    console.log('Element rect:', rect);
+    console.log('Popup rect:', popupRect);
+    
+    // Calculate position (to the right of result item)
+    const left = rect.right + 10;
+    const top = rect.top;
+    
+    // For popup extensions, position relative to viewport instead of popup bounds
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    // Ensure preview stays within viewport
+    const maxLeft = viewportWidth - 250 - 10; // 250px preview width + 10px margin
+    const finalLeft = Math.min(left, maxLeft);
+    const finalTop = Math.max(10, Math.min(top, viewportHeight - 200 - 10)); // 200px preview height
+    
+    console.log('Calculated position:', { finalLeft, finalTop });
+    
+    // Set position
+    previewContainer.style.left = `${finalLeft}px`;
+    previewContainer.style.top = `${finalTop}px`;
+    
+    // Set header content
+    previewHeader.textContent = result.title || result.url;
+    
+    // Reset content with loading message
+    previewContent.innerHTML = '<div class="preview-loading">Loading preview...</div>';
+    
+    // Show preview container
+    previewContainer.classList.remove('hidden');
+    previewContainer.style.display = 'block';
+    
+    console.log('Preview container should now be visible');
+    console.log('Preview container classes:', previewContainer.className);
+    
+    // Trigger animation
+    setTimeout(() => {
+        previewContainer.classList.add('visible');
+        console.log('Added visible class to preview');
+    }, 10);
+    
+    // Load preview content
+    loadPreviewContent(result);
+}
+
+function hidePreview() {
+    if (currentPreviewTimeout) {
+        clearTimeout(currentPreviewTimeout);
+    }
+    
+    previewContainer.classList.remove('visible');
+    
+    // Hide after animation completes
+    setTimeout(() => {
+        previewContainer.classList.add('hidden');
+    }, 200);
+}
+
+async function loadPreviewContent(result) {
+    try {
+        // First, try to load screenshot if available
+        const screenshot = await getStoredScreenshot(result.url);
+        if (screenshot) {
+            console.log('📸 Loading screenshot for:', result.title);
+            showScreenshotPreview(screenshot, result);
+            return;
+        }
+        
+        // Check if URL is likely to work in iframe
+        if (isIframeBlocked(result.url)) {
+            showPreviewFallback(result);
+            return;
+        }
+        
+        // Try to load as iframe for live preview
+        const iframe = document.createElement('iframe');
+        iframe.className = 'preview-content';
+        iframe.src = result.url;
+        iframe.sandbox = 'allow-same-origin';
+        iframe.loading = 'lazy';
+        
+        // Set loading timeout (shorter for better UX)
+        const loadTimeout = setTimeout(() => {
+            console.log('⏰ Preview timeout, showing fallback');
+            showPreviewFallback(result);
+        }, 3000);
+        
+        iframe.onerror = () => {
+            clearTimeout(loadTimeout);
+            console.log('🔄 Iframe failed, showing fallback for:', result.title);
+            showPreviewFallback(result);
+        };
+        
+        // Also handle X-Frame-Options errors
+        iframe.onload = () => {
+            clearTimeout(loadTimeout);
+            try {
+                // Test if iframe content is accessible
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (!iframeDoc) {
+                    console.log('🔄 Iframe blocked by X-Frame-Options, showing fallback');
+                    showPreviewFallback(result);
+                    return;
+                }
+                console.log('✅ Iframe loaded successfully');
+                previewContent.innerHTML = '';
+                previewContent.appendChild(iframe);
+            } catch (e) {
+                console.log('🔄 Iframe CORS/security error, showing fallback:', e.message);
+                // Remove the failed iframe first
+                previewContent.innerHTML = '';
+                showPreviewFallback(result);
+            }
+        };
+        
+        // Start loading iframe
+        previewContent.innerHTML = '';
+        previewContent.appendChild(iframe);
+        
+    } catch (error) {
+        console.error('Error loading preview:', error);
+        showPreviewFallback(result);
+    }
+}
+
+function isIframeBlocked(url) {
+    // Common sites that block iframe embedding
+    const blockedDomains = [
+        'google.com',
+        'youtube.com',
+        'facebook.com',
+        'twitter.com',
+        'instagram.com',
+        'linkedin.com',
+        'github.com',
+        'stackoverflow.com',
+        'apple.com',
+        'microsoft.com',
+        'amazon.com'
+    ];
+    
+    try {
+        const domain = new URL(url).hostname.toLowerCase();
+        return blockedDomains.some(blocked => domain.includes(blocked));
+    } catch (e) {
+        return true; // Invalid URL
+    }
+}
+
+function showPreviewFallback(result) {
+    console.log('📝 showPreviewFallback called for:', result.title);
+    console.log('📝 Result snippet:', result.snippet);
+    
+    // Show content snippet as fallback
+    const fallbackHTML = `
+        <div style="padding: 16px; font-size: 12px; line-height: 1.4; color: #333; background: #f8f9fa; height: 100%; box-sizing: border-box;">
+            <div style="font-weight: 500; margin-bottom: 8px; color: #1a73e8;">📄 Content Preview:</div>
+            <div style="color: #5f6368; margin-bottom: 12px;">${escapeHtml(result.snippet || 'No content preview available')}</div>
+            <div style="margin-top: auto; padding-top: 8px; border-top: 1px solid #e8eaed; font-size: 11px; color: #9aa0a6;">
+                🔗 Click to visit: ${escapeHtml(result.url)}
+            </div>
+        </div>
+    `;
+    
+    previewContent.innerHTML = fallbackHTML;
+    console.log('📝 Fallback content set');
+}
+
+// Get stored screenshot for a URL
+async function getStoredScreenshot(url) {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'GET_STORED_CONTENT',
+            url: url
+        });
+        
+        if (response.success && response.content && response.content.screenshot) {
+            return response.content.screenshot;
+        }
+        return null;
+    } catch (error) {
+        console.log('Could not get stored screenshot:', error);
+        return null;
+    }
+}
+
+// Show screenshot preview
+function showScreenshotPreview(screenshot, result) {
+    console.log('📸 Displaying screenshot preview');
+    
+    const screenshotHTML = `
+        <div style="height: 100%; display: flex; flex-direction: column;">
+            <img src="${screenshot}" 
+                 class="preview-screenshot" 
+                 alt="Page preview"
+                 style="flex: 1; width: 100%; height: 100%; object-fit: cover; border-radius: 4px;" />
+            <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.7)); color: white; padding: 8px; font-size: 11px;">
+                📸 Screenshot preview
+            </div>
+        </div>
+    `;
+    
+    previewContent.innerHTML = screenshotHTML;
+    console.log('📸 Screenshot preview displayed');
+}
+
+function showPreviewError(message) {
+    previewContent.innerHTML = `
+        <div class="preview-error">
+            <div>⚠️</div>
+            <div>${escapeHtml(message)}</div>
+            <div style="margin-top: 8px; font-size: 10px;">Click result to visit page</div>
+        </div>
+    `;
 }
 
 // Utility functions
