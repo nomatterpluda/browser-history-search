@@ -5,6 +5,14 @@ const resultsContainer = document.getElementById('resultsContainer');
 const noResults = document.getElementById('noResults');
 const extractButton = document.getElementById('extractButton');
 const statsButton = document.getElementById('statsButton');
+const settingsButton = document.getElementById('settingsButton');
+const settingsModal = document.getElementById('settingsModal');
+const closeModal = document.getElementById('closeModal');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const saveSettings = document.getElementById('saveSettings');
+const testApi = document.getElementById('testApi');
+const apiStatus = document.getElementById('apiStatus');
+const statusText = document.getElementById('statusText');
 
 // State management
 let searchTimeout;
@@ -20,6 +28,17 @@ document.addEventListener('DOMContentLoaded', () => {
     searchInput.addEventListener('keydown', handleKeyDown);
     extractButton.addEventListener('click', handleExtractContent);
     statsButton.addEventListener('click', showStats);
+    settingsButton.addEventListener('click', openSettings);
+    closeModal.addEventListener('click', closeSettings);
+    saveSettings.addEventListener('click', handleSaveSettings);
+    testApi.addEventListener('click', handleTestApi);
+    
+    // Close modal when clicking outside
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) {
+            closeSettings();
+        }
+    });
     
     // Load recent history on startup
     loadRecentHistory();
@@ -256,5 +275,154 @@ The extension is working! Content is being extracted and stored for future seman
     } catch (error) {
         console.error('Error getting stats:', error);
         alert('❌ Error loading statistics');
+    }
+}
+
+// Settings Modal Functions
+async function openSettings() {
+    try {
+        // Load current settings
+        await loadCurrentSettings();
+        
+        // Check OpenAI status
+        await updateApiStatus();
+        
+        // Show modal
+        settingsModal.classList.remove('hidden');
+        apiKeyInput.focus();
+        
+    } catch (error) {
+        console.error('Error opening settings:', error);
+    }
+}
+
+function closeSettings() {
+    settingsModal.classList.add('hidden');
+    apiKeyInput.value = '';
+}
+
+async function loadCurrentSettings() {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'GET_SETTINGS'
+        });
+        
+        if (response.success && response.settings.openaiApiKey) {
+            // Show masked API key
+            const maskedKey = response.settings.openaiApiKey.substring(0, 7) + '...' + response.settings.openaiApiKey.slice(-4);
+            apiKeyInput.placeholder = `Current: ${maskedKey}`;
+        }
+    } catch (error) {
+        console.error('Error loading settings:', error);
+    }
+}
+
+async function updateApiStatus() {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'GET_OPENAI_STATUS'
+        });
+        
+        if (response.success) {
+            const status = response.status;
+            
+            if (status.isReady) {
+                apiStatus.className = 'api-status success';
+                statusText.textContent = '✅ API key configured and ready';
+            } else if (status.isConfigured) {
+                apiStatus.className = 'api-status warning';
+                statusText.textContent = '⚠️ API key configured but not validated';
+            } else {
+                apiStatus.className = 'api-status error';
+                statusText.textContent = '❌ API key not configured';
+            }
+        }
+    } catch (error) {
+        console.error('Error getting API status:', error);
+        apiStatus.className = 'api-status error';
+        statusText.textContent = '❌ Error checking API status';
+    }
+}
+
+async function handleSaveSettings() {
+    const apiKey = apiKeyInput.value.trim();
+    
+    if (!apiKey) {
+        alert('Please enter an API key');
+        return;
+    }
+    
+    if (!apiKey.startsWith('sk-')) {
+        alert('Invalid API key format. OpenAI API keys start with "sk-"');
+        return;
+    }
+    
+    try {
+        saveSettings.disabled = true;
+        saveSettings.textContent = '💾 Saving...';
+        
+        const response = await chrome.runtime.sendMessage({
+            type: 'SET_OPENAI_API_KEY',
+            apiKey: apiKey
+        });
+        
+        if (response.success) {
+            saveSettings.textContent = '✅ Saved!';
+            await updateApiStatus();
+            
+            setTimeout(() => {
+                saveSettings.textContent = '💾 Save Settings';
+                saveSettings.disabled = false;
+                closeSettings();
+            }, 1500);
+        } else {
+            throw new Error(response.error || 'Failed to save API key');
+        }
+        
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        alert(`❌ Error saving API key: ${error.message}`);
+        
+        saveSettings.textContent = '💾 Save Settings';
+        saveSettings.disabled = false;
+    }
+}
+
+async function handleTestApi() {
+    const apiKey = apiKeyInput.value.trim();
+    
+    if (!apiKey) {
+        alert('Please enter an API key to test');
+        return;
+    }
+    
+    try {
+        testApi.disabled = true;
+        testApi.textContent = '🧪 Testing...';
+        
+        // This will test the API key as part of the save process
+        const response = await chrome.runtime.sendMessage({
+            type: 'SET_OPENAI_API_KEY',
+            apiKey: apiKey
+        });
+        
+        if (response.success) {
+            testApi.textContent = '✅ Valid!';
+            await updateApiStatus();
+        } else {
+            throw new Error(response.error || 'API key test failed');
+        }
+        
+        setTimeout(() => {
+            testApi.textContent = '🧪 Test API Key';
+            testApi.disabled = false;
+        }, 2000);
+        
+    } catch (error) {
+        console.error('Error testing API key:', error);
+        alert(`❌ API key test failed: ${error.message}`);
+        
+        testApi.textContent = '🧪 Test API Key';
+        testApi.disabled = false;
     }
 } 
