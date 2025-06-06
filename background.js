@@ -614,19 +614,69 @@ async function storeExtractedContent(content) {
 // Extract content from a specific tab
 async function extractContentFromTab(tabId) {
     try {
+        // First, get tab information to check if content script can run
+        const tab = await chrome.tabs.get(tabId);
+        
+        // Check if the URL is compatible with content scripts
+        if (!isValidUrlForContentScript(tab.url)) {
+            throw new Error(`Cannot extract content from ${tab.url} - content scripts not allowed on this type of page`);
+        }
+        
+        // Check if content script is already injected
+        try {
+            const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+            if (!response) {
+                // Content script not present, inject it
+                await chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    files: ['content.js']
+                });
+            }
+        } catch (injectionError) {
+            // Content script not present, inject it
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    files: ['content.js']
+                });
+            } catch (secondError) {
+                console.log('Failed to inject content script:', secondError);
+            }
+        }
+        
+        // Wait a moment for content script to be ready
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         const response = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_CONTENT' });
         
-        if (response.success) {
+        if (response && response.success) {
             await handleContentExtracted(response.content);
             return response.content;
         } else {
-            throw new Error(response.reason || 'Content extraction failed');
+            throw new Error(response?.reason || 'Content extraction failed');
         }
         
     } catch (error) {
         console.error('Error extracting content from tab:', error);
         throw error;
     }
+}
+
+// Check if URL is valid for content script injection
+function isValidUrlForContentScript(url) {
+    if (!url) return false;
+    
+    const invalidPatterns = [
+        /^chrome:/,
+        /^chrome-extension:/,
+        /^moz-extension:/,
+        /^about:/,
+        /^file:/,
+        /^data:/,
+        /^javascript:/
+    ];
+    
+    return !invalidPatterns.some(pattern => pattern.test(url));
 }
 
 // Get stored statistics

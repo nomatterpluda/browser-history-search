@@ -246,11 +246,20 @@ async function handleExtractContent() {
         
     } catch (error) {
         console.error('Error extracting content:', error);
-        extractButton.textContent = '❌ Failed';
+        
+        // Show more specific error messages
+        if (error.message.includes('content scripts not allowed')) {
+            extractButton.textContent = '❌ System Page';
+        } else if (error.message.includes('Could not establish connection')) {
+            extractButton.textContent = '❌ Refresh Page';
+        } else {
+            extractButton.textContent = '❌ Failed';
+        }
+        
         setTimeout(() => {
             extractButton.textContent = '📄 Extract Current Page';
             extractButton.disabled = false;
-        }, 2000);
+        }, 3000);
     }
 }
 

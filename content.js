@@ -1,23 +1,30 @@
 // Content script for extracting page content
-console.log('Browser History Search content script loaded');
+// Prevent multiple injections
+if (window.browserHistorySearchContentScript) {
+    console.log('Content script already loaded, skipping');
+} else {
+    window.browserHistorySearchContentScript = true;
+    console.log('Browser History Search content script loaded');
 
 // Configuration for content extraction
-const EXTRACTION_CONFIG = {
-    maxTextLength: 5000, // Limit text to avoid API costs
-    minTextLength: 50,   // Skip pages with very little content
-    excludeSelectors: [
-        'script',
-        'style', 
-        'nav',
-        'header',
-        'footer',
-        '.advertisement',
-        '.ads',
-        '.sidebar',
-        '.menu',
-        '.navigation'
-    ]
-};
+if (!window.EXTRACTION_CONFIG) {
+    window.EXTRACTION_CONFIG = {
+        maxTextLength: 5000, // Limit text to avoid API costs
+        minTextLength: 50,   // Skip pages with very little content
+        excludeSelectors: [
+            'script',
+            'style', 
+            'nav',
+            'header',
+            'footer',
+            '.advertisement',
+            '.ads',
+            '.sidebar',
+            '.menu',
+            '.navigation'
+        ]
+    };
+}
 
 // Extract meaningful text content from the page
 function extractPageContent() {
@@ -36,14 +43,14 @@ function extractPageContent() {
         const cleanedContent = cleanText(combinedContent);
         
         // Validate content length
-        if (cleanedContent.length < EXTRACTION_CONFIG.minTextLength) {
+        if (cleanedContent.length < window.EXTRACTION_CONFIG.minTextLength) {
             console.log('Page content too short, skipping extraction');
             return null;
         }
         
         // Truncate if too long
-        const finalContent = cleanedContent.length > EXTRACTION_CONFIG.maxTextLength 
-            ? cleanedContent.substring(0, EXTRACTION_CONFIG.maxTextLength) + '...'
+        const finalContent = cleanedContent.length > window.EXTRACTION_CONFIG.maxTextLength 
+            ? cleanedContent.substring(0, window.EXTRACTION_CONFIG.maxTextLength) + '...'
             : cleanedContent;
             
         return {
@@ -90,7 +97,7 @@ function extractMainText() {
     const clonedElement = targetElement.cloneNode(true);
     
     // Remove unwanted elements
-    EXTRACTION_CONFIG.excludeSelectors.forEach(selector => {
+    window.EXTRACTION_CONFIG.excludeSelectors.forEach(selector => {
         const elements = clonedElement.querySelectorAll(selector);
         elements.forEach(el => el.remove());
     });
@@ -135,7 +142,7 @@ function shouldProcessPage() {
     
     // Skip if page is too small (likely not content)
     const bodyText = document.body?.textContent || '';
-    if (bodyText.length < EXTRACTION_CONFIG.minTextLength) {
+    if (bodyText.length < window.EXTRACTION_CONFIG.minTextLength) {
         return false;
     }
     
@@ -144,6 +151,11 @@ function shouldProcessPage() {
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'PING') {
+        sendResponse({ success: true });
+        return;
+    }
+    
     if (message.type === 'EXTRACT_CONTENT') {
         console.log('Content extraction requested');
         
@@ -185,4 +197,6 @@ function autoExtractContent() {
             console.log('Background script not ready, content extraction skipped');
         });
     }
-} 
+}
+
+} // End of guard to prevent multiple injections
