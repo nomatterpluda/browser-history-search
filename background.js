@@ -263,7 +263,8 @@ async function initializeExtension() {
                 dataRetentionDays: 180, // 6 months default
                 maxResults: 10,
                 enablePreview: true,
-                lastProcessedDate: null
+                lastProcessedDate: null,
+                aiOptimization: true // Enable smart AI processing by default
             },
             stats: {
                 totalPages: 0,
@@ -372,22 +373,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     switch (message.type) {
         case 'SEARCH_HISTORY':
-            handleHistorySearch(message.query, message.page || 0, message.limit || 20)
+            handleHistorySearch(message.query)
                 .then(results => sendResponse({ success: true, results }))
                 .catch(error => {
                     console.error('Search error:', error);
                     sendResponse({ success: false, error: error.message });
                 });
             return true; // Keep message channel open for async response
-            
-        case 'GET_RECENT_HISTORY':
-            getRecentHistoryPaginated(message.page || 0, message.limit || 20)
-                .then(results => sendResponse({ success: true, results }))
-                .catch(error => {
-                    console.error('Recent history error:', error);
-                    sendResponse({ success: false, error: error.message });
-                });
-            return true;
             
         case 'GET_SETTINGS':
             getSettings()
@@ -454,6 +446,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // Get stored content for a URL
             getStoredContentForUrl(message.url)
                 .then(content => sendResponse({ success: true, content }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'SET_AI_OPTIMIZATION':
+            // Set AI optimization setting
+            setAiOptimizationSetting(message.enabled)
+                .then(() => sendResponse({ success: true }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'PAGE_VISIT_TRACKED':
+            // Handle page visit tracking for AI optimization
+            handlePageVisitTracked(message.url, message.timeSpent)
+                .then(() => sendResponse({ success: true }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'GET_RECENT_HISTORY':
+            // Get recent browsing history with pagination
+            getRecentHistoryWithPagination(message.page || 0, message.limit || 20)
+                .then(results => sendResponse({ success: true, results }))
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
@@ -528,14 +541,69 @@ function filterHistoryItems(historyItems) {
     });
 }
 
+// Get recent history with pagination support
+async function getRecentHistoryWithPagination(page = 0, limit = 20) {
+    try {
+        const endTime = Date.now();
+        const startTime = endTime - (30 * 24 * 60 * 60 * 1000); // Last 30 days
+        
+        // Get more items than needed to account for filtering
+        const maxResults = (page + 1) * limit * 3; // Get 3x more to account for filtering
+        
+        const historyItems = await chrome.history.search({
+            text: '',
+            startTime: startTime,
+            endTime: endTime,
+            maxResults: maxResults
+        });
+        
+        console.log(`Retrieved ${historyItems.length} history items for pagination`);
+        
+        // Filter items
+        const filteredItems = filterHistoryItems(historyItems);
+        
+        // Sort by last visit time (most recent first)
+        filteredItems.sort((a, b) => b.lastVisitTime - a.lastVisitTime);
+        
+        // Apply pagination
+        const startIndex = page * limit;
+        const endIndex = startIndex + limit;
+        const paginatedItems = filteredItems.slice(startIndex, endIndex);
+        
+        // Format items and add additional data
+        const formattedItems = await Promise.all(
+            paginatedItems.map(async (item) => {
+                const formattedItem = formatHistoryItem(item);
+                
+                // Try to get stored content for enhanced display
+                const storedContent = await getStoredContentForUrl(item.url);
+                if (storedContent && storedContent.screenshot) {
+                    formattedItem.screenshot = storedContent.screenshot;
+                }
+                
+                return formattedItem;
+            })
+        );
+        
+        console.log(`Returning ${formattedItems.length} formatted history items for page ${page}`);
+        return formattedItems;
+        
+    } catch (error) {
+        console.error('Error fetching paginated history:', error);
+        throw error;
+    }
+}
+
 // Enhanced search function that includes extracted content
-async function handleHistorySearch(query, page = 0, limit = 20) {
-    console.log('Searching history for:', query, 'page:', page, 'limit:', limit);
+async function handleHistorySearch(query) {
+    console.log('Searching history for:', query);
     
     try {
         if (query.trim() === '') {
             // Return recent items if no query
-            return await getRecentHistoryPaginated(page, limit);
+            const historyItems = await getRecentHistory(500);
+            const filteredItems = filterHistoryItems(historyItems);
+            return filteredItems.slice(0, 10).map(item => formatHistoryItem(item));
         }
         
         // Try semantic search first if OpenAI is available
@@ -552,12 +620,7 @@ async function handleHistorySearch(query, page = 0, limit = 20) {
         }
         
         // Fallback to enhanced text search
-        const results = await performTextSearch(query);
-        
-        // Apply pagination to search results
-        const startIndex = page * limit;
-        const endIndex = startIndex + limit;
-        return results.slice(startIndex, endIndex);
+        return await performTextSearch(query);
         
     } catch (error) {
         console.error('Search error:', error);
@@ -570,25 +633,6 @@ async function handleHistorySearch(query, page = 0, limit = 20) {
             favicon: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBmaWxsPSIjZmY0NDQ0Ii8+Cjx0ZXh0IHg9IjgiIHk9IjEyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4hPC90ZXh0Pgo8L3N2Zz4K',
             relevanceScore: 0
         }];
-    }
-}
-
-// Get recent history with pagination
-async function getRecentHistoryPaginated(page = 0, limit = 20) {
-    try {
-        const historyItems = await getRecentHistory(1000); // Get more items for pagination
-        const filteredItems = filterHistoryItems(historyItems);
-        
-        // Apply pagination
-        const startIndex = page * limit;
-        const endIndex = startIndex + limit;
-        const paginatedItems = filteredItems.slice(startIndex, endIndex);
-        
-        return paginatedItems.map(item => formatHistoryItem(item));
-        
-    } catch (error) {
-        console.error('Error getting recent history:', error);
-        return [];
     }
 }
 
@@ -830,7 +874,6 @@ function formatHistoryItem(historyItem) {
         url: historyItem.url,
         snippet: generateSnippet(historyItem),
         visitDate: visitDate.toISOString(),
-        lastVisitTime: historyItem.lastVisitTime || Date.now(), // Keep original timestamp for frontend
         favicon: getFaviconUrl(historyItem.url),
         visitCount: historyItem.visitCount || 1,
         relevanceScore: calculateRelevanceScore(historyItem)
@@ -1154,19 +1197,10 @@ async function createThumbnail(dataUrl, maxWidth, maxHeight) {
 async function getStats() {
     try {
         const result = await chrome.storage.local.get(['stats']);
-        const stats = result.stats || { totalPages: 0, lastUpdate: null };
-        
-        // Count embeddings dynamically
-        const allData = await chrome.storage.local.get(null);
-        const embeddingsCount = Object.keys(allData).filter(key => key.startsWith('embeddings_')).length;
-        
-        return {
-            ...stats,
-            totalEmbeddings: embeddingsCount
-        };
+        return result.stats || { totalPages: 0, lastUpdate: null };
     } catch (error) {
         console.error('Error getting stats:', error);
-        return { totalPages: 0, totalEmbeddings: 0, lastUpdate: null };
+        return { totalPages: 0, lastUpdate: null };
     }
 }
 
@@ -1343,6 +1377,203 @@ function cosineSimilarity(vecA, vecB) {
     }
     
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// AI Optimization functions
+async function setAiOptimizationSetting(enabled) {
+    try {
+        const settings = await getSettings();
+        settings.aiOptimization = enabled;
+        await chrome.storage.local.set({ [STORAGE_CONFIG.settingsKey]: settings });
+        console.log('AI optimization setting updated:', enabled);
+    } catch (error) {
+        console.error('Error setting AI optimization:', error);
+        throw error;
+    }
+}
+
+async function getAiOptimizationSetting() {
+    try {
+        const settings = await getSettings();
+        return settings.aiOptimization !== false; // Default to true
+    } catch (error) {
+        console.error('Error getting AI optimization setting:', error);
+        return true; // Default to enabled
+    }
+}
+
+async function handlePageVisitTracked(url, timeSpent) {
+    try {
+        // Store page visit data for potential AI processing
+        const visitData = {
+            url: url,
+            timeSpent: timeSpent,
+            visitedAt: new Date().toISOString()
+        };
+        
+        // Store in temporary storage for processing
+        const key = `visit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await chrome.storage.local.set({ [key]: visitData });
+        
+        // Check if we should process this page for AI embeddings
+        await checkAndProcessPageForAI(url, timeSpent);
+        
+    } catch (error) {
+        console.error('Error handling page visit tracking:', error);
+        throw error;
+    }
+}
+
+async function checkAndProcessPageForAI(url, timeSpent) {
+    try {
+        // Check if AI optimization is enabled
+        const aiOptimizationEnabled = await getAiOptimizationSetting();
+        if (!aiOptimizationEnabled) {
+            return; // Skip AI processing if disabled
+        }
+        
+        // Get stored content for this URL
+        const storedContent = await getStoredContentForUrl(url);
+        if (!storedContent) {
+            return; // No content to process
+        }
+        
+        // Calculate word count
+        const wordCount = storedContent.content ? storedContent.content.split(/\s+/).length : 0;
+        
+        // Check if page meets criteria for AI processing
+        const pageData = {
+            url: url,
+            timeSpent: timeSpent,
+            wordCount: wordCount
+        };
+        
+        if (shouldEmbedPage(pageData)) {
+            console.log('Page qualifies for AI processing:', url);
+            // Generate embeddings for this content
+            await generateEmbeddingsForStoredContent(url);
+        } else {
+            console.log('Page does not qualify for AI processing:', url, {
+                timeSpent: timeSpent,
+                wordCount: wordCount
+            });
+        }
+        
+    } catch (error) {
+        console.error('Error checking page for AI processing:', error);
+    }
+}
+
+// Smart page filtering logic (same as in content script)
+function shouldEmbedPage(pageData) {
+    const url = pageData.url;
+    const timeSpent = pageData.timeSpent || 0;
+    const wordCount = pageData.wordCount || 0;
+    
+    // Must spend at least 30 seconds on page
+    if (timeSpent < 30000) {
+        return false;
+    }
+    
+    // Must have substantial content (500+ words)
+    if (wordCount < 500) {
+        return false;
+    }
+    
+    // Skip navigation pages
+    if (isNavigationPage(url)) {
+        return false;
+    }
+    
+    // Skip search results pages
+    if (isSearchResultsPage(url)) {
+        return false;
+    }
+    
+    // Skip login/auth pages
+    if (isAuthPage(url)) {
+        return false;
+    }
+    
+    // Skip social media feeds and news aggregators
+    if (isSocialMediaFeed(url) || isNewsAggregator(url)) {
+        return false;
+    }
+    
+    return true;
+}
+
+function isNavigationPage(url) {
+    const navigationPatterns = [
+        /\/sitemap/i,
+        /\/navigation/i,
+        /\/menu/i,
+        /\/index\.html?$/i,
+        /\/$/, // Root pages
+        /\/category\//i,
+        /\/tag\//i,
+        /\/archive/i
+    ];
+    
+    return navigationPatterns.some(pattern => pattern.test(url));
+}
+
+function isSearchResultsPage(url) {
+    const searchPatterns = [
+        /[?&]q=/i,
+        /[?&]search=/i,
+        /[?&]query=/i,
+        /\/search\//i,
+        /\/results\//i,
+        /google\.com\/search/i,
+        /bing\.com\/search/i,
+        /duckduckgo\.com/i
+    ];
+    
+    return searchPatterns.some(pattern => pattern.test(url));
+}
+
+function isAuthPage(url) {
+    const authPatterns = [
+        /\/login/i,
+        /\/signin/i,
+        /\/signup/i,
+        /\/register/i,
+        /\/auth/i,
+        /\/password/i,
+        /\/forgot/i,
+        /\/reset/i,
+        /\/verify/i,
+        /\/oauth/i
+    ];
+    
+    return authPatterns.some(pattern => pattern.test(url));
+}
+
+function isSocialMediaFeed(url) {
+    const socialPatterns = [
+        /twitter\.com\/home/i,
+        /facebook\.com\/$/i,
+        /instagram\.com\/$/i,
+        /linkedin\.com\/feed/i,
+        /reddit\.com\/$/i,
+        /reddit\.com\/r\/[^\/]+\/?$/i, // Subreddit main pages
+        /tiktok\.com\/$/i
+    ];
+    
+    return socialPatterns.some(pattern => pattern.test(url));
+}
+
+function isNewsAggregator(url) {
+    const newsPatterns = [
+        /news\.ycombinator\.com\/$/i,
+        /reddit\.com\/r\/all/i,
+        /reddit\.com\/popular/i,
+        /digg\.com\/$/i,
+        /slashdot\.org\/$/i
+    ];
+    
+    return newsPatterns.some(pattern => pattern.test(url));
 }
 
 // Error handling for unhandled promise rejections

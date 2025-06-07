@@ -93,6 +93,20 @@ class SearchOverlay {
                              </p>
                          </div>
                          <div class="setting-group">
+                             <div class="setting-toggle-row">
+                                 <div class="setting-toggle-info">
+                                     <label for="ai-optimization-toggle">Smart AI Processing</label>
+                                     <p class="setting-description">
+                                         Process only meaningful pages (30s+ visit, 500+ words). Reduces costs by ~90%.
+                                     </p>
+                                 </div>
+                                 <label class="ios-toggle">
+                                     <input type="checkbox" id="ai-optimization-toggle" checked>
+                                     <span class="ios-slider"></span>
+                                 </label>
+                             </div>
+                         </div>
+                         <div class="setting-group">
                              <label>Search Statistics</label>
                              <div class="stats-display">
                                  <div class="stat-item">
@@ -133,6 +147,7 @@ class SearchOverlay {
         this.apiKeyInput = this.overlay.querySelector('.api-key-input');
         this.testApiKeyButton = this.overlay.querySelector('.test-api-key');
         this.apiKeyStatus = this.overlay.querySelector('.api-key-status');
+        this.aiOptimizationToggle = this.overlay.querySelector('#ai-optimization-toggle');
         
         // Hide initially
         this.overlay.style.display = 'none';
@@ -625,6 +640,79 @@ class SearchOverlay {
                 font-weight: 600;
             }
             
+            .setting-toggle-row {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 20px;
+            }
+            
+            .setting-toggle-info {
+                flex: 1;
+            }
+            
+            .setting-toggle-info label {
+                margin-bottom: 8px;
+            }
+            
+            .ios-toggle {
+                position: relative;
+                display: inline-block;
+                width: 51px;
+                height: 31px;
+                flex-shrink: 0;
+                margin-top: 2px;
+            }
+            
+            .ios-toggle input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            
+            .ios-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: #39393d;
+                border-radius: 31px;
+                transition: all 0.25s ease;
+                box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.1);
+            }
+            
+            .ios-slider:before {
+                position: absolute;
+                content: "";
+                height: 27px;
+                width: 27px;
+                left: 2px;
+                top: 2px;
+                background: #ffffff;
+                border-radius: 50%;
+                transition: all 0.25s ease;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.1);
+            }
+            
+            .ios-toggle input:checked + .ios-slider {
+                background: #34c759;
+                box-shadow: inset 0 0 0 2px rgba(52, 199, 89, 0.2);
+            }
+            
+            .ios-toggle input:checked + .ios-slider:before {
+                transform: translateX(20px);
+            }
+            
+            .ios-toggle:hover .ios-slider {
+                box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.15), 0 0 0 4px rgba(52, 199, 89, 0.1);
+            }
+            
+            .ios-toggle input:checked:hover + .ios-slider {
+                box-shadow: inset 0 0 0 2px rgba(52, 199, 89, 0.3), 0 0 0 4px rgba(52, 199, 89, 0.15);
+            }
+            
 
         `;
         
@@ -706,6 +794,11 @@ class SearchOverlay {
         // Save API key on blur
         this.apiKeyInput.addEventListener('blur', () => {
             this.saveApiKey();
+        });
+        
+        // AI optimization toggle
+        this.aiOptimizationToggle.addEventListener('change', () => {
+            this.saveAiOptimizationSetting();
         });
     }
     
@@ -1155,6 +1248,10 @@ class SearchOverlay {
                     this.apiKeyStatus.textContent = 'API key configured';
                     this.apiKeyStatus.className = 'api-key-status success';
                 }
+                
+                // Load AI optimization setting (default to true)
+                const aiOptimization = response.settings.aiOptimization !== false;
+                this.aiOptimizationToggle.checked = aiOptimization;
             }
         } catch (error) {
             console.error('Error loading settings:', error);
@@ -1249,6 +1346,17 @@ class SearchOverlay {
         } finally {
             this.testApiKeyButton.textContent = 'Test';
             this.testApiKeyButton.disabled = false;
+        }
+    }
+    
+    async saveAiOptimizationSetting() {
+        try {
+            await chrome.runtime.sendMessage({
+                type: 'SET_AI_OPTIMIZATION',
+                enabled: this.aiOptimizationToggle.checked
+            });
+        } catch (error) {
+            console.error('Error saving AI optimization setting:', error);
         }
     }
 }
@@ -1447,6 +1555,10 @@ function shouldProcessPage() {
     return true;
 }
 
+// Page visit tracking for AI optimization
+let pageVisitStartTime = Date.now();
+let pageVisitTracked = false;
+
 // Auto-extract content when page loads (for future processing)
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
@@ -1456,12 +1568,161 @@ if (document.readyState === 'loading') {
     setTimeout(autoExtractContent, 2000);
 }
 
+// Track page unload to measure time spent
+window.addEventListener('beforeunload', () => {
+    if (!pageVisitTracked) {
+        const timeSpent = Date.now() - pageVisitStartTime;
+        // Store time spent for potential AI processing
+        chrome.runtime.sendMessage({
+            type: 'PAGE_VISIT_TRACKED',
+            url: window.location.href,
+            timeSpent: timeSpent
+        }).catch(() => {
+            // Ignore errors during page unload
+        });
+        pageVisitTracked = true;
+    }
+});
+
+// Also track on visibility change (tab switching)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden && !pageVisitTracked) {
+        const timeSpent = Date.now() - pageVisitStartTime;
+        if (timeSpent > 30000) { // Only track if spent more than 30 seconds
+            chrome.runtime.sendMessage({
+                type: 'PAGE_VISIT_TRACKED',
+                url: window.location.href,
+                timeSpent: timeSpent
+            }).catch(() => {
+                // Ignore errors
+            });
+            pageVisitTracked = true;
+        }
+    }
+});
+
+// Check if page should be processed for AI embeddings
+function shouldEmbedPage(pageData) {
+    const url = pageData.url || window.location.href;
+    const timeSpent = pageData.timeSpent || 0;
+    const wordCount = pageData.wordCount || 0;
+    
+    // Must spend at least 30 seconds on page
+    if (timeSpent < 30000) {
+        return false;
+    }
+    
+    // Must have substantial content (500+ words)
+    if (wordCount < 500) {
+        return false;
+    }
+    
+    // Skip navigation pages
+    if (isNavigationPage(url)) {
+        return false;
+    }
+    
+    // Skip search results pages
+    if (isSearchResultsPage(url)) {
+        return false;
+    }
+    
+    // Skip login/auth pages
+    if (isAuthPage(url)) {
+        return false;
+    }
+    
+    // Skip social media feeds and news aggregators
+    if (isSocialMediaFeed(url) || isNewsAggregator(url)) {
+        return false;
+    }
+    
+    return true;
+}
+
+function isNavigationPage(url) {
+    const navigationPatterns = [
+        /\/sitemap/i,
+        /\/navigation/i,
+        /\/menu/i,
+        /\/index\.html?$/i,
+        /\/$/, // Root pages
+        /\/category\//i,
+        /\/tag\//i,
+        /\/archive/i
+    ];
+    
+    return navigationPatterns.some(pattern => pattern.test(url));
+}
+
+function isSearchResultsPage(url) {
+    const searchPatterns = [
+        /[?&]q=/i,
+        /[?&]search=/i,
+        /[?&]query=/i,
+        /\/search\//i,
+        /\/results\//i,
+        /google\.com\/search/i,
+        /bing\.com\/search/i,
+        /duckduckgo\.com/i
+    ];
+    
+    return searchPatterns.some(pattern => pattern.test(url));
+}
+
+function isAuthPage(url) {
+    const authPatterns = [
+        /\/login/i,
+        /\/signin/i,
+        /\/signup/i,
+        /\/register/i,
+        /\/auth/i,
+        /\/password/i,
+        /\/forgot/i,
+        /\/reset/i,
+        /\/verify/i,
+        /\/oauth/i
+    ];
+    
+    return authPatterns.some(pattern => pattern.test(url));
+}
+
+function isSocialMediaFeed(url) {
+    const socialPatterns = [
+        /twitter\.com\/home/i,
+        /facebook\.com\/$/i,
+        /instagram\.com\/$/i,
+        /linkedin\.com\/feed/i,
+        /reddit\.com\/$/i,
+        /reddit\.com\/r\/[^\/]+\/?$/i, // Subreddit main pages
+        /tiktok\.com\/$/i
+    ];
+    
+    return socialPatterns.some(pattern => pattern.test(url));
+}
+
+function isNewsAggregator(url) {
+    const newsPatterns = [
+        /news\.ycombinator\.com\/$/i,
+        /reddit\.com\/r\/all/i,
+        /reddit\.com\/popular/i,
+        /digg\.com\/$/i,
+        /slashdot\.org\/$/i
+    ];
+    
+    return newsPatterns.some(pattern => pattern.test(url));
+}
+
 // Automatically extract content for processing
 function autoExtractContent() {
     if (!shouldProcessPage()) return;
     
     const extractedContent = extractPageContent();
     if (extractedContent) {
+        // Calculate word count for AI optimization
+        const wordCount = extractedContent.content.split(/\s+/).length;
+        extractedContent.wordCount = wordCount;
+        
         // Get current tab ID and add it to content
         chrome.runtime.sendMessage({
             type: 'GET_CURRENT_TAB_ID'
