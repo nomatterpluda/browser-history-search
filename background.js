@@ -372,13 +372,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     switch (message.type) {
         case 'SEARCH_HISTORY':
-            handleHistorySearch(message.query)
+            handleHistorySearch(message.query, message.page || 0, message.limit || 20)
                 .then(results => sendResponse({ success: true, results }))
                 .catch(error => {
                     console.error('Search error:', error);
                     sendResponse({ success: false, error: error.message });
                 });
             return true; // Keep message channel open for async response
+            
+        case 'GET_RECENT_HISTORY':
+            getRecentHistoryPaginated(message.page || 0, message.limit || 20)
+                .then(results => sendResponse({ success: true, results }))
+                .catch(error => {
+                    console.error('Recent history error:', error);
+                    sendResponse({ success: false, error: error.message });
+                });
+            return true;
             
         case 'GET_SETTINGS':
             getSettings()
@@ -520,15 +529,13 @@ function filterHistoryItems(historyItems) {
 }
 
 // Enhanced search function that includes extracted content
-async function handleHistorySearch(query) {
-    console.log('Searching history for:', query);
+async function handleHistorySearch(query, page = 0, limit = 20) {
+    console.log('Searching history for:', query, 'page:', page, 'limit:', limit);
     
     try {
         if (query.trim() === '') {
             // Return recent items if no query
-            const historyItems = await getRecentHistory(500);
-            const filteredItems = filterHistoryItems(historyItems);
-            return filteredItems.slice(0, 10).map(item => formatHistoryItem(item));
+            return await getRecentHistoryPaginated(page, limit);
         }
         
         // Try semantic search first if OpenAI is available
@@ -545,7 +552,12 @@ async function handleHistorySearch(query) {
         }
         
         // Fallback to enhanced text search
-        return await performTextSearch(query);
+        const results = await performTextSearch(query);
+        
+        // Apply pagination to search results
+        const startIndex = page * limit;
+        const endIndex = startIndex + limit;
+        return results.slice(startIndex, endIndex);
         
     } catch (error) {
         console.error('Search error:', error);
@@ -558,6 +570,25 @@ async function handleHistorySearch(query) {
             favicon: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBmaWxsPSIjZmY0NDQ0Ii8+Cjx0ZXh0IHg9IjgiIHk9IjEyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4hPC90ZXh0Pgo8L3N2Zz4K',
             relevanceScore: 0
         }];
+    }
+}
+
+// Get recent history with pagination
+async function getRecentHistoryPaginated(page = 0, limit = 20) {
+    try {
+        const historyItems = await getRecentHistory(1000); // Get more items for pagination
+        const filteredItems = filterHistoryItems(historyItems);
+        
+        // Apply pagination
+        const startIndex = page * limit;
+        const endIndex = startIndex + limit;
+        const paginatedItems = filteredItems.slice(startIndex, endIndex);
+        
+        return paginatedItems.map(item => formatHistoryItem(item));
+        
+    } catch (error) {
+        console.error('Error getting recent history:', error);
+        return [];
     }
 }
 
@@ -799,6 +830,7 @@ function formatHistoryItem(historyItem) {
         url: historyItem.url,
         snippet: generateSnippet(historyItem),
         visitDate: visitDate.toISOString(),
+        lastVisitTime: historyItem.lastVisitTime || Date.now(), // Keep original timestamp for frontend
         favicon: getFaviconUrl(historyItem.url),
         visitCount: historyItem.visitCount || 1,
         relevanceScore: calculateRelevanceScore(historyItem)
@@ -1122,10 +1154,19 @@ async function createThumbnail(dataUrl, maxWidth, maxHeight) {
 async function getStats() {
     try {
         const result = await chrome.storage.local.get(['stats']);
-        return result.stats || { totalPages: 0, lastUpdate: null };
+        const stats = result.stats || { totalPages: 0, lastUpdate: null };
+        
+        // Count embeddings dynamically
+        const allData = await chrome.storage.local.get(null);
+        const embeddingsCount = Object.keys(allData).filter(key => key.startsWith('embeddings_')).length;
+        
+        return {
+            ...stats,
+            totalEmbeddings: embeddingsCount
+        };
     } catch (error) {
         console.error('Error getting stats:', error);
-        return { totalPages: 0, lastUpdate: null };
+        return { totalPages: 0, totalEmbeddings: 0, lastUpdate: null };
     }
 }
 
