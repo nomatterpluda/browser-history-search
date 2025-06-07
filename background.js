@@ -360,6 +360,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
+        case 'DEBUG_STORAGE':
+            // Debug function to check what's stored
+            getAllStoredContent()
+                .then(content => {
+                    const urls = Object.keys(content).map(key => content[key].url);
+                    sendResponse({ success: true, storedUrls: urls, totalItems: urls.length });
+                })
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
         case 'PING':
             // Health check endpoint
             sendResponse({ success: true, status: 'ready' });
@@ -421,39 +431,36 @@ function filterHistoryItems(historyItems) {
     });
 }
 
-// Search function with basic text matching (before semantic search)
+// Enhanced search function that includes extracted content
 async function handleHistorySearch(query) {
     console.log('Searching history for:', query);
     
     try {
-        // Get recent history
-        const historyItems = await getRecentHistory(500);
-        const filteredItems = filterHistoryItems(historyItems);
-        
         if (query.trim() === '') {
             // Return recent items if no query
+            const historyItems = await getRecentHistory(500);
+            const filteredItems = filterHistoryItems(historyItems);
             return filteredItems.slice(0, 10).map(item => formatHistoryItem(item));
         }
         
-        // Basic text search (will be replaced with semantic search later)
-        const searchTerms = query.toLowerCase().split(' ');
-        const matchedItems = filteredItems.filter(item => {
-            const searchText = `${item.title} ${item.url}`.toLowerCase();
-            return searchTerms.some(term => searchText.includes(term));
-        });
+        // Try semantic search first if OpenAI is available
+        if (openAIService.isReady()) {
+            try {
+                const semanticResults = await performSemanticSearch(query);
+                if (semanticResults.length > 0) {
+                    console.log(`Found ${semanticResults.length} semantic search results`);
+                    return semanticResults;
+                }
+            } catch (error) {
+                console.warn('Semantic search failed, falling back to text search:', error.message);
+            }
+        }
         
-        // Sort by visit count and recency
-        matchedItems.sort((a, b) => {
-            const scoreA = (a.visitCount || 1) * (a.lastVisitTime || 0);
-            const scoreB = (b.visitCount || 1) * (b.lastVisitTime || 0);
-            return scoreB - scoreA;
-        });
-        
-        return matchedItems.slice(0, 10).map(item => formatHistoryItem(item));
+        // Fallback to enhanced text search
+        return await performTextSearch(query);
         
     } catch (error) {
         console.error('Search error:', error);
-        // Fallback to mock results if history API fails
         return [{
             id: 'error-fallback',
             title: 'Search temporarily unavailable',
@@ -463,6 +470,234 @@ async function handleHistorySearch(query) {
             favicon: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBmaWxsPSIjZmY0NDQ0Ii8+Cjx0ZXh0IHg9IjgiIHk9IjEyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4hPC90ZXh0Pgo8L3N2Zz4K',
             relevanceScore: 0
         }];
+    }
+}
+
+// Enhanced text search that includes extracted content
+async function performTextSearch(query) {
+    console.log('Performing enhanced text search for:', query);
+    
+    // Preprocess query - remove common words and short terms
+    const stopWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
+    const searchTerms = query.toLowerCase()
+        .split(/\s+/)
+        .filter(term => term.length >= 2 && !stopWords.includes(term))
+        .filter(term => term.length > 0);
+    
+    if (searchTerms.length === 0) {
+        console.log('No valid search terms after preprocessing');
+        return [];
+    }
+    
+    console.log('Search terms after preprocessing:', searchTerms);
+    
+    // Get browser history
+    const historyItems = await getRecentHistory(500);
+    const filteredItems = filterHistoryItems(historyItems);
+    
+    // Get extracted content
+    const extractedContent = await getAllStoredContent();
+    
+    const results = [];
+    
+    // Search through browser history (titles and URLs) - require higher threshold
+    filteredItems.forEach(item => {
+        const titleScore = calculateTextMatchScore(item.title || '', searchTerms);
+        const urlScore = calculateTextMatchScore(item.url || '', searchTerms) * 0.5; // URL matches less important
+        const totalScore = titleScore + urlScore;
+        
+        if (totalScore >= 5) { // Higher threshold for title/URL matches
+            results.push({
+                ...formatHistoryItem(item),
+                matchScore: totalScore,
+                matchType: 'title'
+            });
+        }
+    });
+    
+    // Search through extracted content - require meaningful matches
+    Object.values(extractedContent).forEach(content => {
+        if (!content.content) return;
+        
+        const titleScore = calculateTextMatchScore(content.title || '', searchTerms);
+        const contentScore = calculateTextMatchScore(content.content, searchTerms);
+        const totalScore = titleScore * 2 + contentScore; // Title matches more important
+        
+        if (totalScore >= 8) { // Higher threshold for content matches
+            // Check if we already have this URL from history search
+            const existingIndex = results.findIndex(r => r.url === content.url);
+            
+            if (existingIndex >= 0) {
+                // Boost existing result if content matches
+                results[existingIndex].matchScore = Math.max(results[existingIndex].matchScore, totalScore);
+                results[existingIndex].matchType = 'content';
+                results[existingIndex].snippet = generateContentSnippet(content.content, searchTerms);
+            } else {
+                // Add new result from extracted content
+                results.push({
+                    id: `content-${Date.now()}-${Math.random()}`,
+                    title: content.title || 'Untitled Page',
+                    url: content.url,
+                    snippet: generateContentSnippet(content.content, searchTerms),
+                    visitDate: content.extractedAt || new Date().toISOString(),
+                    favicon: getFaviconUrl(content.url),
+                    visitCount: 1,
+                    relevanceScore: totalScore / 20, // Normalize to 0-1
+                    matchScore: totalScore,
+                    matchType: 'content'
+                });
+            }
+        }
+    });
+    
+    // Sort by match score and recency
+    results.sort((a, b) => {
+        const scoreA = a.matchScore * (a.relevanceScore || 0.5);
+        const scoreB = b.matchScore * (b.relevanceScore || 0.5);
+        return scoreB - scoreA;
+    });
+    
+    console.log(`Found ${results.length} text search results`);
+    return results.slice(0, 10);
+}
+
+// Calculate text match score with better precision
+function calculateTextMatchScore(text, searchTerms) {
+    let score = 0;
+    const textLower = text.toLowerCase();
+    const textWords = textLower.split(/\s+/);
+    
+    searchTerms.forEach(term => {
+        const termLower = term.toLowerCase();
+        
+        // Exact word matches (highest score)
+        const exactWordMatch = textWords.some(word => 
+            word.replace(/[^\w]/g, '') === termLower.replace(/[^\w]/g, '')
+        );
+        if (exactWordMatch) {
+            score += 10;
+            return;
+        }
+        
+        // Exact phrase matches
+        if (textLower.includes(termLower)) {
+            score += 5;
+            return;
+        }
+        
+        // Word starts with term (medium score)
+        const startsWithMatch = textWords.some(word => 
+            word.replace(/[^\w]/g, '').startsWith(termLower.replace(/[^\w]/g, ''))
+        );
+        if (startsWithMatch && termLower.length >= 3) {
+            score += 2;
+            return;
+        }
+        
+        // Partial matches only for longer terms (low score)
+        if (termLower.length >= 4) {
+            const partialMatch = textWords.some(word => 
+                word.replace(/[^\w]/g, '').includes(termLower.replace(/[^\w]/g, ''))
+            );
+            if (partialMatch) {
+                score += 1;
+            }
+        }
+    });
+    
+    return score;
+}
+
+// Generate content snippet with highlighted terms
+function generateContentSnippet(content, searchTerms) {
+    const maxLength = 150;
+    const lowerContent = content.toLowerCase();
+    
+    // Find the first occurrence of any search term
+    let bestIndex = -1;
+    let bestTerm = '';
+    
+    searchTerms.forEach(term => {
+        const index = lowerContent.indexOf(term.toLowerCase());
+        if (index !== -1 && (bestIndex === -1 || index < bestIndex)) {
+            bestIndex = index;
+            bestTerm = term;
+        }
+    });
+    
+    if (bestIndex === -1) {
+        // No terms found, return beginning
+        return content.substring(0, maxLength) + (content.length > maxLength ? '...' : '');
+    }
+    
+    // Extract snippet around the found term
+    const start = Math.max(0, bestIndex - 50);
+    const end = Math.min(content.length, start + maxLength);
+    let snippet = content.substring(start, end);
+    
+    // Add ellipsis if needed
+    if (start > 0) snippet = '...' + snippet;
+    if (end < content.length) snippet = snippet + '...';
+    
+    return snippet;
+}
+
+// Perform semantic search using OpenAI embeddings
+async function performSemanticSearch(query) {
+    console.log('Performing semantic search for:', query);
+    
+    try {
+        // Generate embedding for the search query
+        const queryEmbeddingResult = await openAIService.generateEmbeddings(query);
+        if (!queryEmbeddingResult.success) {
+            throw new Error('Failed to generate query embedding');
+        }
+        
+        const queryEmbedding = queryEmbeddingResult.embedding;
+        
+        // Get all stored embeddings
+        const allEmbeddings = await getAllEmbeddings();
+        const results = [];
+        
+        // Calculate similarity scores with higher threshold
+        Object.values(allEmbeddings).forEach(embeddingData => {
+            const similarity = cosineSimilarity(queryEmbedding, embeddingData.embedding);
+            
+            if (similarity > 0.8) { // Higher threshold for better precision
+                results.push({
+                    url: embeddingData.url,
+                    similarity: similarity
+                });
+            }
+        });
+        
+        // Sort by similarity
+        results.sort((a, b) => b.similarity - a.similarity);
+        
+        // Get content for top results and format them
+        const formattedResults = [];
+        for (const result of results.slice(0, 10)) {
+            const content = await getStoredContentForUrl(result.url);
+            if (content) {
+                formattedResults.push({
+                    id: `semantic-${Date.now()}-${Math.random()}`,
+                    title: content.title || 'Untitled Page',
+                    url: content.url,
+                    snippet: content.content ? content.content.substring(0, 150) + '...' : 'No content available',
+                    visitDate: content.extractedAt || new Date().toISOString(),
+                    favicon: getFaviconUrl(content.url),
+                    visitCount: 1,
+                    relevanceScore: result.similarity,
+                    matchType: 'semantic'
+                });
+            }
+        }
+        
+        return formattedResults;
+        
+    } catch (error) {
+        console.error('Semantic search error:', error);
+        return [];
     }
 }
 
