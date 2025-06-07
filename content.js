@@ -103,14 +103,6 @@ class SearchOverlay {
                 justify-content: center;
                 padding-top: 15vh;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                opacity: 0;
-                transform: scale(0.95);
-                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            }
-            
-            #browser-history-search-overlay.visible {
-                opacity: 1;
-                transform: scale(1);
             }
             
             .search-overlay-backdrop {
@@ -122,36 +114,46 @@ class SearchOverlay {
                 background: rgba(0, 0, 0, 0.4);
                 backdrop-filter: blur(20px);
                 -webkit-backdrop-filter: blur(20px);
+                opacity: 0;
+                transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            
+            #browser-history-search-overlay.visible .search-overlay-backdrop {
+                opacity: 1;
             }
             
             .search-container {
                 position: relative;
                 width: 90%;
                 max-width: 640px;
-                background: rgba(255, 255, 255, 0.95);
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 16px;
-                box-shadow: 
-                    0 20px 40px rgba(0, 0, 0, 0.1),
-                    0 8px 16px rgba(0, 0, 0, 0.08),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+                border-radius: 20px;
+                border: 1px solid rgba(0, 0, 0, 0.12);
+                background: rgba(37, 37, 37, 0.80);
+                box-shadow: 0px 8px 57px 0px rgba(0, 0, 0, 0.30);
+                backdrop-filter: blur(42px);
+                -webkit-backdrop-filter: blur(42px);
                 overflow: hidden;
-                transform: translateY(0);
-                transition: transform 0.2s ease;
+                opacity: 0;
+                transform: scale(0.95);
+                transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1) 0.1s, 
+                           transform 0.2s cubic-bezier(0.4, 0, 0.2, 1) 0.1s;
+            }
+            
+            #browser-history-search-overlay.visible .search-container {
+                opacity: 1;
+                transform: scale(1);
             }
             
             .search-box {
                 display: flex;
                 align-items: center;
                 padding: 20px 24px;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-                background: rgba(255, 255, 255, 0.8);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                background: transparent;
             }
             
             .search-icon {
-                color: #6b7280;
+                color: #9ca3af;
                 margin-right: 12px;
                 flex-shrink: 0;
             }
@@ -162,36 +164,36 @@ class SearchOverlay {
                 outline: none;
                 background: transparent;
                 font-size: 18px;
-                color: #1f2937;
+                color: #f9fafb;
                 font-weight: 400;
                 line-height: 1.5;
             }
             
             .search-input::placeholder {
-                color: #9ca3af;
+                color: #6b7280;
             }
             
             .search-shortcut {
-                background: rgba(0, 0, 0, 0.05);
-                color: #6b7280;
+                background: rgba(255, 255, 255, 0.1);
+                color: #9ca3af;
                 padding: 4px 8px;
                 border-radius: 6px;
                 font-size: 12px;
                 font-weight: 500;
-                border: 1px solid rgba(0, 0, 0, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
             }
             
             .search-results {
                 max-height: 400px;
                 overflow-y: auto;
-                background: rgba(255, 255, 255, 0.9);
+                background: transparent;
             }
             
             .search-result {
                 display: flex;
                 align-items: center;
                 padding: 12px 24px;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
                 cursor: pointer;
                 transition: all 0.15s ease;
                 position: relative;
@@ -199,7 +201,7 @@ class SearchOverlay {
             
             .search-result:hover,
             .search-result.selected {
-                background: rgba(59, 130, 246, 0.08);
+                background: rgba(59, 130, 246, 0.15);
                 border-left: 3px solid #3b82f6;
                 padding-left: 21px;
             }
@@ -214,12 +216,12 @@ class SearchOverlay {
                 margin-right: 12px;
                 border-radius: 4px;
                 flex-shrink: 0;
-                background: #f3f4f6;
+                background: rgba(255, 255, 255, 0.1);
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 font-size: 10px;
-                color: #6b7280;
+                color: #9ca3af;
                 font-weight: 600;
             }
             
@@ -231,7 +233,7 @@ class SearchOverlay {
             .result-title {
                 font-size: 16px;
                 font-weight: 500;
-                color: #1f2937;
+                color: #f9fafb;
                 margin-bottom: 2px;
                 white-space: nowrap;
                 overflow: hidden;
@@ -240,7 +242,7 @@ class SearchOverlay {
             
             .result-url {
                 font-size: 13px;
-                color: #6b7280;
+                color: #9ca3af;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -249,7 +251,7 @@ class SearchOverlay {
             
             .result-snippet {
                 font-size: 13px;
-                color: #9ca3af;
+                color: #6b7280;
                 line-height: 1.4;
                 display: -webkit-box;
                 -webkit-line-clamp: 2;
@@ -259,37 +261,38 @@ class SearchOverlay {
             
             .result-date {
                 font-size: 12px;
-                color: #9ca3af;
+                color: #6b7280;
                 margin-left: 12px;
                 flex-shrink: 0;
             }
             
             .search-footer {
                 padding: 12px 24px;
-                background: rgba(249, 250, 251, 0.8);
-                border-top: 1px solid rgba(0, 0, 0, 0.06);
+                background: transparent;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
             }
             
             .search-tips {
                 display: flex;
                 gap: 16px;
                 font-size: 12px;
-                color: #6b7280;
+                color: #9ca3af;
             }
             
             .tip kbd {
-                background: rgba(0, 0, 0, 0.05);
-                border: 1px solid rgba(0, 0, 0, 0.1);
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 3px;
                 padding: 2px 4px;
                 font-size: 10px;
                 margin: 0 2px;
+                color: #d1d5db;
             }
             
             .no-results {
                 padding: 40px 24px;
                 text-align: center;
-                color: #6b7280;
+                color: #9ca3af;
             }
             
             .no-results-icon {
@@ -301,7 +304,7 @@ class SearchOverlay {
             .loading {
                 padding: 20px 24px;
                 text-align: center;
-                color: #6b7280;
+                color: #9ca3af;
                 font-size: 14px;
             }
             
@@ -322,39 +325,7 @@ class SearchOverlay {
                 100% { transform: rotate(360deg); }
             }
             
-            /* Dark mode support */
-            @media (prefers-color-scheme: dark) {
-                .search-container {
-                    background: rgba(31, 41, 55, 0.95);
-                    border-color: rgba(255, 255, 255, 0.1);
-                }
-                
-                .search-box {
-                    background: rgba(31, 41, 55, 0.8);
-                    border-color: rgba(255, 255, 255, 0.1);
-                }
-                
-                .search-input {
-                    color: #f9fafb;
-                }
-                
-                .search-input::placeholder {
-                    color: #6b7280;
-                }
-                
-                .search-results {
-                    background: rgba(31, 41, 55, 0.9);
-                }
-                
-                .result-title {
-                    color: #f9fafb;
-                }
-                
-                .search-footer {
-                    background: rgba(17, 24, 39, 0.8);
-                    border-color: rgba(255, 255, 255, 0.1);
-                }
-            }
+
         `;
         
         document.head.appendChild(styles);
