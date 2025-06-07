@@ -278,6 +278,94 @@ async function initializeExtension() {
     }
 }
 
+// Handle keyboard commands
+chrome.commands.onCommand.addListener(async (command) => {
+    console.log('Command received:', command);
+    
+    if (command === 'open-search-overlay') {
+        try {
+            // Get the active tab
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tabs.length > 0) {
+                const tabId = tabs[0].id;
+                
+                try {
+                    // First check if content script is available
+                    const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+                    
+                    if (response && response.success) {
+                        // Content script is available, toggle overlay
+                        await chrome.tabs.sendMessage(tabId, {
+                            type: 'TOGGLE_SEARCH_OVERLAY'
+                        });
+                    } else {
+                        throw new Error('Content script not responding');
+                    }
+                } catch (messageError) {
+                    console.log('Content script not available for keyboard command, injecting...');
+                    
+                    // Inject content script if not available
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tabId },
+                        files: ['content.js']
+                    });
+                    
+                    // Wait a moment for script to initialize
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Try to toggle overlay again
+                    await chrome.tabs.sendMessage(tabId, {
+                        type: 'TOGGLE_SEARCH_OVERLAY'
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error handling command:', error);
+        }
+    }
+});
+
+// Handle extension icon click to also open overlay
+chrome.action.onClicked.addListener(async (tab) => {
+    try {
+        // First check if content script is available
+        const response = await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
+        
+        if (response && response.success) {
+            // Content script is available, toggle overlay
+            await chrome.tabs.sendMessage(tab.id, {
+                type: 'TOGGLE_SEARCH_OVERLAY'
+            });
+        } else {
+            throw new Error('Content script not responding');
+        }
+    } catch (error) {
+        console.log('Content script not available, injecting and trying again...');
+        
+        try {
+            // Inject content script if not available
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content.js']
+            });
+            
+            // Wait a moment for script to initialize
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Try to toggle overlay again
+            await chrome.tabs.sendMessage(tab.id, {
+                type: 'TOGGLE_SEARCH_OVERLAY'
+            });
+        } catch (injectionError) {
+            console.error('Could not inject content script:', injectionError);
+            // Final fallback: open popup
+            await chrome.action.setPopup({ popup: 'popup.html' });
+            // The popup will open on next click since we can't programmatically open it
+            console.log('Popup fallback enabled - click the extension icon again to open popup');
+        }
+    }
+});
+
 // Handle messages from popup or content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('Background received message:', message);
