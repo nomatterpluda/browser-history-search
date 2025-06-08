@@ -377,7 +377,7 @@ class SearchOverlay {
                 border: 1px solid #dadce0;
                 border-radius: 8px;
                 box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-                z-index: 10000;
+                z-index: 2147483648;
                 overflow: hidden;
                 pointer-events: none;
                 opacity: 0;
