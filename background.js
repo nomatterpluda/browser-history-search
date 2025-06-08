@@ -458,7 +458,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             
         case 'PAGE_VISIT_TRACKED':
             // Handle page visit tracking for AI optimization
-            handlePageVisitTracked(message.url, message.timeSpent)
+            handlePageVisitTracked(message.url, message.timeSpent, message.tabId)
                 .then(() => sendResponse({ success: true }))
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
@@ -477,6 +477,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     const urls = Object.keys(content).map(key => content[key].url);
                     sendResponse({ success: true, storedUrls: urls, totalItems: urls.length });
                 })
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'GET_SCREENSHOT':
+            // Get screenshot for a specific URL
+            getScreenshotForUrl(message.url)
+                .then(screenshot => sendResponse({ success: true, screenshot }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'CAPTURE_SCREENSHOT':
+            // Capture screenshot for current tab
+            chrome.tabs.query({ active: true, currentWindow: true })
+                .then(tabs => {
+                    if (tabs.length > 0) {
+                        return capturePageScreenshot(tabs[0].id, tabs[0].url);
+                    } else {
+                        throw new Error('No active tab found');
+                    }
+                })
+                .then(screenshot => sendResponse({ success: true, screenshot }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'CLEANUP_SCREENSHOTS':
+            // Clean up expired screenshots
+            cleanupExpiredScreenshots()
+                .then(() => sendResponse({ success: true }))
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
@@ -1110,8 +1138,8 @@ function isValidUrlForContentScript(url) {
     return !invalidPatterns.some(pattern => pattern.test(url));
 }
 
-// Capture screenshot of a tab
-async function capturePageScreenshot(tabId) {
+// Capture screenshot of a tab with AVIF compression
+async function capturePageScreenshot(tabId, url) {
     try {
         // Make sure the tab is active and visible
         const tab = await chrome.tabs.get(tabId);
@@ -1128,15 +1156,14 @@ async function capturePageScreenshot(tabId) {
             throw new Error('Tab status changed during wait');
         }
         
-        // Capture visible tab with higher quality
+        // Capture visible tab at native 250px width
         const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-            format: 'jpeg',
-            quality: 60  // Lower quality to reduce file size
+            format: 'png' // Use PNG for better quality before AVIF conversion
         });
         
-        // Convert to smaller thumbnail for storage efficiency
-        const thumbnail = await createThumbnail(dataUrl, 250, 200);
-        return thumbnail;
+        // Convert to AVIF with 250px width and dynamic height
+        const avifScreenshot = await createAVIFScreenshot(dataUrl, url);
+        return avifScreenshot;
         
     } catch (error) {
         console.error('Error capturing screenshot:', error);
@@ -1144,52 +1171,155 @@ async function capturePageScreenshot(tabId) {
     }
 }
 
-// Create thumbnail from full screenshot
-async function createThumbnail(dataUrl, maxWidth, maxHeight) {
+// Create AVIF screenshot with 250px width and dynamic height
+async function createAVIFScreenshot(dataUrl, url) {
     try {
         // Use OffscreenCanvas which is available in service workers
-        const canvas = new OffscreenCanvas(maxWidth, maxHeight);
-        const ctx = canvas.getContext('2d');
-        
-        // Convert data URL to ImageBitmap (works in service workers)
         const response = await fetch(dataUrl);
         const blob = await response.blob();
         const imageBitmap = await createImageBitmap(blob);
         
-        // Calculate scaling to fit within bounds while maintaining aspect ratio
-        const scale = Math.min(maxWidth / imageBitmap.width, maxHeight / imageBitmap.height);
-        const scaledWidth = imageBitmap.width * scale;
-        const scaledHeight = imageBitmap.height * scale;
+        // Calculate dimensions: 250px width, proportional height
+        const targetWidth = 250;
+        const aspectRatio = imageBitmap.height / imageBitmap.width;
+        const targetHeight = Math.round(targetWidth * aspectRatio);
         
-        // Center the image
-        const x = (maxWidth - scaledWidth) / 2;
-        const y = (maxHeight - scaledHeight) / 2;
-        
-        // Fill background
-        ctx.fillStyle = '#f8f9fa';
-        ctx.fillRect(0, 0, maxWidth, maxHeight);
+        const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+        const ctx = canvas.getContext('2d');
         
         // Draw scaled image
-        ctx.drawImage(imageBitmap, x, y, scaledWidth, scaledHeight);
+        ctx.drawImage(imageBitmap, 0, 0, targetWidth, targetHeight);
         
-        // Convert to blob and then to data URL
-        const thumbnailBlob = await canvas.convertToBlob({ 
-            type: 'image/jpeg', 
-            quality: 0.7 
-        });
+        // Try to convert to AVIF, fallback to WebP, then JPEG
+        let screenshotBlob;
+        let format = 'avif';
+        
+        try {
+            screenshotBlob = await canvas.convertToBlob({ 
+                type: 'image/avif', 
+                quality: 0.8 
+            });
+        } catch (avifError) {
+            console.log('AVIF not supported, trying WebP');
+            try {
+                screenshotBlob = await canvas.convertToBlob({ 
+                    type: 'image/webp', 
+                    quality: 0.8 
+                });
+                format = 'webp';
+            } catch (webpError) {
+                console.log('WebP not supported, using JPEG');
+                screenshotBlob = await canvas.convertToBlob({ 
+                    type: 'image/jpeg', 
+                    quality: 0.8 
+                });
+                format = 'jpeg';
+            }
+        }
         
         // Convert blob to data URL
-        return new Promise((resolve) => {
+        const screenshotDataUrl = await new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(thumbnailBlob);
+            reader.readAsDataURL(screenshotBlob);
         });
         
+        // Store screenshot with metadata
+        await storeScreenshot(url, screenshotDataUrl, format, targetWidth, targetHeight);
+        
+        return {
+            dataUrl: screenshotDataUrl,
+            format: format,
+            width: targetWidth,
+            height: targetHeight,
+            size: screenshotBlob.size
+        };
+        
     } catch (error) {
-        console.error('Error creating thumbnail:', error);
-        // Fallback: return original but warn about size
-        console.warn('Using full-size image - storage may be impacted');
-        return dataUrl;
+        console.error('Error creating AVIF screenshot:', error);
+        return null;
+    }
+}
+
+// Store screenshot with metadata
+async function storeScreenshot(url, dataUrl, format, width, height) {
+    try {
+        const settings = await getSettings();
+        const retentionDays = settings.screenshotRetention || 30; // Default 30 days
+        
+        const screenshotKey = `screenshot_${btoa(url).replace(/[/+=]/g, '_')}`;
+        const screenshotData = {
+            url: url,
+            dataUrl: dataUrl,
+            format: format,
+            width: width,
+            height: height,
+            capturedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + (retentionDays * 24 * 60 * 60 * 1000)).toISOString()
+        };
+        
+        await chrome.storage.local.set({ [screenshotKey]: screenshotData });
+        console.log(`Screenshot stored for ${url} (${format}, ${width}x${height})`);
+        
+        // Update stats
+        const stats = await getStats();
+        stats.totalScreenshots = (stats.totalScreenshots || 0) + 1;
+        stats.lastScreenshot = new Date().toISOString();
+        await chrome.storage.local.set({ stats });
+        
+    } catch (error) {
+        console.error('Error storing screenshot:', error);
+    }
+}
+
+// Get screenshot for URL
+async function getScreenshotForUrl(url) {
+    try {
+        const screenshotKey = `screenshot_${btoa(url).replace(/[/+=]/g, '_')}`;
+        const result = await chrome.storage.local.get([screenshotKey]);
+        const screenshot = result[screenshotKey];
+        
+        if (!screenshot) {
+            return null;
+        }
+        
+        // Check if screenshot has expired
+        if (new Date(screenshot.expiresAt) < new Date()) {
+            // Remove expired screenshot
+            await chrome.storage.local.remove([screenshotKey]);
+            return null;
+        }
+        
+        return screenshot;
+        
+    } catch (error) {
+        console.error('Error getting screenshot:', error);
+        return null;
+    }
+}
+
+// Clean up expired screenshots
+async function cleanupExpiredScreenshots() {
+    try {
+        const allData = await chrome.storage.local.get(null);
+        const screenshotKeys = Object.keys(allData).filter(key => key.startsWith('screenshot_'));
+        const now = new Date();
+        const expiredKeys = [];
+        
+        for (const key of screenshotKeys) {
+            const screenshot = allData[key];
+            if (screenshot && screenshot.expiresAt && new Date(screenshot.expiresAt) < now) {
+                expiredKeys.push(key);
+            }
+        }
+        
+        if (expiredKeys.length > 0) {
+            await chrome.storage.local.remove(expiredKeys);
+            console.log(`Cleaned up ${expiredKeys.length} expired screenshots`);
+        }
+        
+    } catch (error) {
+        console.error('Error cleaning up expired screenshots:', error);
     }
 }
 
@@ -1197,10 +1327,20 @@ async function createThumbnail(dataUrl, maxWidth, maxHeight) {
 async function getStats() {
     try {
         const result = await chrome.storage.local.get(['stats']);
-        return result.stats || { totalPages: 0, lastUpdate: null };
+        return result.stats || { 
+            totalPages: 0, 
+            totalScreenshots: 0,
+            lastUpdate: null,
+            lastScreenshot: null
+        };
     } catch (error) {
         console.error('Error getting stats:', error);
-        return { totalPages: 0, lastUpdate: null };
+        return { 
+            totalPages: 0, 
+            totalScreenshots: 0,
+            lastUpdate: null,
+            lastScreenshot: null
+        };
     }
 }
 
@@ -1402,7 +1542,7 @@ async function getAiOptimizationSetting() {
     }
 }
 
-async function handlePageVisitTracked(url, timeSpent) {
+async function handlePageVisitTracked(url, timeSpent, tabId) {
     try {
         // Store page visit data for potential AI processing
         const visitData = {
@@ -1418,10 +1558,56 @@ async function handlePageVisitTracked(url, timeSpent) {
         // Check if we should process this page for AI embeddings
         await checkAndProcessPageForAI(url, timeSpent);
         
+        // Capture screenshot if page visit was significant (30+ seconds)
+        if (timeSpent >= 30000 && tabId && shouldCaptureScreenshot(url)) {
+            try {
+                console.log('Capturing screenshot for significant page visit:', url);
+                await capturePageScreenshot(tabId, url);
+            } catch (screenshotError) {
+                console.warn('Screenshot capture failed:', screenshotError.message);
+                // Don't throw - screenshot failure shouldn't break page visit tracking
+            }
+        }
+        
     } catch (error) {
         console.error('Error handling page visit tracking:', error);
         throw error;
     }
+}
+
+// Determine if we should capture a screenshot for this URL
+function shouldCaptureScreenshot(url) {
+    // Skip invalid URLs
+    if (!isValidUrlForContentScript(url)) {
+        return false;
+    }
+    
+    // Skip navigation pages
+    if (isNavigationPage(url)) {
+        return false;
+    }
+    
+    // Skip search results pages
+    if (isSearchResultsPage(url)) {
+        return false;
+    }
+    
+    // Skip login/auth pages
+    if (isAuthPage(url)) {
+        return false;
+    }
+    
+    // Skip social media feeds (but allow individual posts)
+    if (isSocialMediaFeed(url)) {
+        return false;
+    }
+    
+    // Skip news aggregators (but allow individual articles)
+    if (isNewsAggregator(url)) {
+        return false;
+    }
+    
+    return true;
 }
 
 async function checkAndProcessPageForAI(url, timeSpent) {
@@ -1580,3 +1766,23 @@ function isNewsAggregator(url) {
 self.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection in background script:', event.reason);
 }); 
+
+// Schedule periodic cleanup of expired screenshots (every 24 hours)
+setInterval(async () => {
+    try {
+        await cleanupExpiredScreenshots();
+        console.log('Periodic screenshot cleanup completed');
+    } catch (error) {
+        console.error('Error during periodic screenshot cleanup:', error);
+    }
+}, 24 * 60 * 60 * 1000); // 24 hours
+
+// Also run cleanup on startup
+setTimeout(async () => {
+    try {
+        await cleanupExpiredScreenshots();
+        console.log('Startup screenshot cleanup completed');
+    } catch (error) {
+        console.error('Error during startup screenshot cleanup:', error);
+    }
+}, 5000); // 5 seconds after startup

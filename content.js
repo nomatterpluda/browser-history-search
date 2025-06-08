@@ -107,6 +107,20 @@ class SearchOverlay {
                              </div>
                          </div>
                          <div class="setting-group">
+                             <label for="screenshot-retention">Screenshot Retention</label>
+                             <select id="screenshot-retention" class="setting-select">
+                                 <option value="7">1 week</option>
+                                 <option value="30" selected>1 month</option>
+                                 <option value="90">3 months</option>
+                                 <option value="180">6 months</option>
+                                 <option value="365">1 year</option>
+                                 <option value="-1">Forever</option>
+                             </select>
+                             <p class="setting-description">
+                                 How long to keep website screenshots for hover previews.
+                             </p>
+                         </div>
+                         <div class="setting-group">
                              <label>Search Statistics</label>
                              <div class="stats-display">
                                  <div class="stat-item">
@@ -116,6 +130,10 @@ class SearchOverlay {
                                  <div class="stat-item">
                                      <span class="stat-label">AI Embeddings:</span>
                                      <span class="stat-value" id="embeddings-count">-</span>
+                                 </div>
+                                 <div class="stat-item">
+                                     <span class="stat-label">Screenshots:</span>
+                                     <span class="stat-value" id="screenshots-count">-</span>
                                  </div>
                                  <div class="stat-item">
                                      <span class="stat-label">Last updated:</span>
@@ -148,6 +166,7 @@ class SearchOverlay {
         this.testApiKeyButton = this.overlay.querySelector('.test-api-key');
         this.apiKeyStatus = this.overlay.querySelector('.api-key-status');
         this.aiOptimizationToggle = this.overlay.querySelector('#ai-optimization-toggle');
+        this.screenshotRetentionSelect = this.overlay.querySelector('#screenshot-retention');
         
         // Hide initially
         this.overlay.style.display = 'none';
@@ -754,6 +773,44 @@ class SearchOverlay {
                 box-shadow: inset 0 0 0 2px rgba(52, 199, 89, 0.3), 0 0 0 4px rgba(52, 199, 89, 0.15);
             }
             
+            .setting-select {
+                width: 100%;
+                padding: 12px 16px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                color: #f9fafb;
+                font-size: 15px;
+                font-weight: 500;
+                outline: none;
+                cursor: pointer;
+                transition: all 0.15s ease;
+                margin-bottom: 8px;
+                appearance: none;
+                background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+                background-position: right 12px center;
+                background-repeat: no-repeat;
+                background-size: 16px;
+                padding-right: 40px;
+            }
+            
+            .setting-select:hover {
+                background: rgba(255, 255, 255, 0.08);
+                border-color: rgba(255, 255, 255, 0.15);
+            }
+            
+            .setting-select:focus {
+                background: rgba(255, 255, 255, 0.08);
+                border-color: #3b82f6;
+                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            }
+            
+            .setting-select option {
+                background: #1f2937;
+                color: #f9fafb;
+                padding: 8px;
+            }
+            
 
         `;
         
@@ -840,6 +897,11 @@ class SearchOverlay {
         // AI optimization toggle
         this.aiOptimizationToggle.addEventListener('change', () => {
             this.saveAiOptimizationSetting();
+        });
+        
+        // Screenshot retention setting
+        this.screenshotRetentionSelect.addEventListener('change', () => {
+            this.saveScreenshotRetentionSetting();
         });
     }
     
@@ -1128,8 +1190,8 @@ class SearchOverlay {
                 // Set delay before showing preview (300ms as per PRD)
                 hoverTimeout = setTimeout(() => {
                     const resultData = this.currentResults[index];
-                    if (resultData && resultData.screenshot) {
-                        this.showScreenshotPreview(resultData.screenshot, result, e);
+                    if (resultData && resultData.url) {
+                        this.showScreenshotPreview(resultData.url, result, e);
                     }
                 }, 300);
                 
@@ -1305,7 +1367,7 @@ class SearchOverlay {
     }
     
     // Screenshot Preview Functions
-    showScreenshotPreview(screenshot, resultDiv, mouseEvent) {
+    async showScreenshotPreview(url, resultDiv, mouseEvent) {
         // Remove any existing preview
         this.hideScreenshotPreview();
         
@@ -1323,38 +1385,81 @@ class SearchOverlay {
         // Position the preview
         this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, 100); // Initial height
         
-        // Create image to get natural dimensions
-        const img = new Image();
-        img.onload = () => {
-            const maxHeight = 200;
-            const displayHeight = Math.min(img.naturalHeight, maxHeight);
-            
-            previewContainer.innerHTML = `
-                <img src="${screenshot}" 
-                     class="screenshot-preview-image"
-                     style="height: ${displayHeight}px;" 
-                     alt="Page preview">
-            `;
-            
-            // Update position with actual image height
-            this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, displayHeight);
-            
-            // Show with animation
-            requestAnimationFrame(() => {
-                previewContainer.classList.add('visible');
+        try {
+            // Request screenshot from background script
+            const response = await chrome.runtime.sendMessage({
+                type: 'GET_SCREENSHOT',
+                url: url
             });
-        };
-        
-        img.onerror = () => {
-            previewContainer.innerHTML = `
-                <div class="screenshot-preview-loading">Preview unavailable</div>
-            `;
-            requestAnimationFrame(() => {
-                previewContainer.classList.add('visible');
-            });
-        };
-        
-        img.src = screenshot;
+            
+            let screenshot = null;
+            if (response && response.success && response.screenshot) {
+                screenshot = response.screenshot.dataUrl;
+                console.log(`Using real screenshot for ${url} (${response.screenshot.format})`);
+            } else {
+                // Use test screenshot as fallback
+                screenshot = this.generateTestScreenshot();
+                console.log(`Using test screenshot for ${url} (no real screenshot available)`);
+            }
+            
+            // Create image to get natural dimensions
+            const img = new Image();
+            img.onload = () => {
+                const maxHeight = 200;
+                const displayHeight = Math.min(img.naturalHeight, maxHeight);
+                
+                previewContainer.innerHTML = `
+                    <img src="${screenshot}" 
+                         class="screenshot-preview-image"
+                         style="height: ${displayHeight}px;" 
+                         alt="Page preview">
+                `;
+                
+                // Update position with actual image height
+                this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, displayHeight);
+                
+                // Show with animation
+                requestAnimationFrame(() => {
+                    previewContainer.classList.add('visible');
+                });
+            };
+            
+            img.onerror = () => {
+                previewContainer.innerHTML = `
+                    <div class="screenshot-preview-loading">Preview unavailable</div>
+                `;
+                requestAnimationFrame(() => {
+                    previewContainer.classList.add('visible');
+                });
+            };
+            
+            img.src = screenshot;
+            
+        } catch (error) {
+            console.warn('Failed to load screenshot, using test image:', error);
+            
+            // Fallback to test screenshot
+            const img = new Image();
+            img.onload = () => {
+                const maxHeight = 200;
+                const displayHeight = Math.min(img.naturalHeight, maxHeight);
+                
+                previewContainer.innerHTML = `
+                    <img src="${this.generateTestScreenshot()}" 
+                         class="screenshot-preview-image"
+                         style="height: ${displayHeight}px;" 
+                         alt="Test preview">
+                `;
+                
+                this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, displayHeight);
+                
+                requestAnimationFrame(() => {
+                    previewContainer.classList.add('visible');
+                });
+            };
+            
+            img.src = this.generateTestScreenshot();
+        }
     }
     
     positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, imageHeight) {
@@ -1489,6 +1594,10 @@ class SearchOverlay {
                 // Load AI optimization setting (default to true)
                 const aiOptimization = response.settings.aiOptimization !== false;
                 this.aiOptimizationToggle.checked = aiOptimization;
+                
+                // Load screenshot retention setting (default to 30 days)
+                const screenshotRetention = response.settings.screenshotRetention || 30;
+                this.screenshotRetentionSelect.value = screenshotRetention;
             }
         } catch (error) {
             console.error('Error loading settings:', error);
@@ -1504,6 +1613,7 @@ class SearchOverlay {
             if (response && response.success && response.stats) {
                 const pagesCount = document.getElementById('pages-count');
                 const embeddingsCount = document.getElementById('embeddings-count');
+                const screenshotsCount = document.getElementById('screenshots-count');
                 const lastUpdated = document.getElementById('last-updated');
                 
                 if (pagesCount) {
@@ -1512,6 +1622,10 @@ class SearchOverlay {
                 
                 if (embeddingsCount) {
                     embeddingsCount.textContent = response.stats.totalEmbeddings || '-';
+                }
+                
+                if (screenshotsCount) {
+                    screenshotsCount.textContent = response.stats.totalScreenshots || 0;
                 }
                 
                 if (lastUpdated && response.stats.lastUpdate) {
@@ -1594,6 +1708,31 @@ class SearchOverlay {
             });
         } catch (error) {
             console.error('Error saving AI optimization setting:', error);
+        }
+    }
+    
+    async saveScreenshotRetentionSetting() {
+        try {
+            const retentionDays = parseInt(this.screenshotRetentionSelect.value);
+            const settings = await chrome.runtime.sendMessage({
+                type: 'GET_SETTINGS'
+            });
+            
+            if (settings && settings.success) {
+                const updatedSettings = {
+                    ...settings.settings,
+                    screenshotRetention: retentionDays
+                };
+                
+                await chrome.runtime.sendMessage({
+                    type: 'UPDATE_SETTINGS',
+                    settings: updatedSettings
+                });
+                
+                console.log('Screenshot retention setting saved:', retentionDays);
+            }
+        } catch (error) {
+            console.error('Error saving screenshot retention setting:', error);
         }
     }
 }
@@ -1809,13 +1948,29 @@ if (document.readyState === 'loading') {
 window.addEventListener('beforeunload', () => {
     if (!pageVisitTracked) {
         const timeSpent = Date.now() - pageVisitStartTime;
-        // Store time spent for potential AI processing
+        // Get current tab ID and send with page visit data
         chrome.runtime.sendMessage({
-            type: 'PAGE_VISIT_TRACKED',
-            url: window.location.href,
-            timeSpent: timeSpent
+            type: 'GET_CURRENT_TAB_ID'
+        }).then(response => {
+            const tabId = response && response.tabId ? response.tabId : null;
+            // Store time spent for potential AI processing and screenshot capture
+            chrome.runtime.sendMessage({
+                type: 'PAGE_VISIT_TRACKED',
+                url: window.location.href,
+                timeSpent: timeSpent,
+                tabId: tabId
+            }).catch(() => {
+                // Ignore errors during page unload
+            });
         }).catch(() => {
-            // Ignore errors during page unload
+            // Fallback without tabId
+            chrome.runtime.sendMessage({
+                type: 'PAGE_VISIT_TRACKED',
+                url: window.location.href,
+                timeSpent: timeSpent
+            }).catch(() => {
+                // Ignore errors during page unload
+            });
         });
         pageVisitTracked = true;
     }
@@ -1826,12 +1981,28 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden && !pageVisitTracked) {
         const timeSpent = Date.now() - pageVisitStartTime;
         if (timeSpent > 30000) { // Only track if spent more than 30 seconds
+            // Get current tab ID and send with page visit data
             chrome.runtime.sendMessage({
-                type: 'PAGE_VISIT_TRACKED',
-                url: window.location.href,
-                timeSpent: timeSpent
+                type: 'GET_CURRENT_TAB_ID'
+            }).then(response => {
+                const tabId = response && response.tabId ? response.tabId : null;
+                chrome.runtime.sendMessage({
+                    type: 'PAGE_VISIT_TRACKED',
+                    url: window.location.href,
+                    timeSpent: timeSpent,
+                    tabId: tabId
+                }).catch(() => {
+                    // Ignore errors
+                });
             }).catch(() => {
-                // Ignore errors
+                // Fallback without tabId
+                chrome.runtime.sendMessage({
+                    type: 'PAGE_VISIT_TRACKED',
+                    url: window.location.href,
+                    timeSpent: timeSpent
+                }).catch(() => {
+                    // Ignore errors
+                });
             });
             pageVisitTracked = true;
         }
