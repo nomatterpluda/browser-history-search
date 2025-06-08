@@ -390,8 +390,6 @@ class SearchOverlay {
             .screenshot-preview-container.visible {
                 opacity: 1 !important;
                 transform: scale(1) !important;
-                background-color: red !important;
-                border: 3px solid yellow !important;
             }
             
             .screenshot-preview-image {
@@ -1056,7 +1054,6 @@ class SearchOverlay {
         results.forEach((result, index) => {
             if (!result.screenshot) {
                 result.screenshot = this.generateTestScreenshot();
-                console.log(`Added test screenshot to result ${index}:`, result.title);
             }
         });
         
@@ -1131,12 +1128,8 @@ class SearchOverlay {
                 // Set delay before showing preview (300ms as per PRD)
                 hoverTimeout = setTimeout(() => {
                     const resultData = this.currentResults[index];
-                    console.log(`Hover timeout triggered for result ${index}:`, resultData);
                     if (resultData && resultData.screenshot) {
-                        console.log('Showing screenshot preview for:', resultData.title);
                         this.showScreenshotPreview(resultData.screenshot, result, e);
-                    } else {
-                        console.log('No screenshot available for result:', resultData);
                     }
                 }, 300);
                 
@@ -1313,8 +1306,6 @@ class SearchOverlay {
     
     // Screenshot Preview Functions
     showScreenshotPreview(screenshot, resultDiv, mouseEvent) {
-        console.log('showScreenshotPreview called with:', { screenshot: screenshot ? 'present' : 'missing', mouseEvent });
-        
         // Remove any existing preview
         this.hideScreenshotPreview();
         
@@ -1328,11 +1319,9 @@ class SearchOverlay {
         `;
         
         document.body.appendChild(previewContainer);
-        console.log('Preview container added to DOM:', previewContainer);
         
         // Position the preview
         this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, 100); // Initial height
-        console.log('Preview positioned at:', previewContainer.style.left, previewContainer.style.top);
         
         // Create image to get natural dimensions
         const img = new Image();
@@ -1353,8 +1342,6 @@ class SearchOverlay {
             // Show with animation
             requestAnimationFrame(() => {
                 previewContainer.classList.add('visible');
-                console.log('Preview made visible, classes:', previewContainer.className);
-                console.log('Preview final position:', previewContainer.style.left, previewContainer.style.top);
             });
         };
         
@@ -1377,14 +1364,6 @@ class SearchOverlay {
         
         // Get mouse position
         const mouseX = mouseEvent.clientX;
-        
-        console.log('Positioning preview:', {
-            mouseX,
-            rowRect,
-            viewportWidth,
-            viewportHeight,
-            imageHeight
-        });
         
         // Calculate position
         const previewWidth = 250;
