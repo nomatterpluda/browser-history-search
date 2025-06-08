@@ -371,23 +371,27 @@ class SearchOverlay {
             
             /* Screenshot Preview Styles */
             .screenshot-preview-container {
-                position: fixed;
-                width: 250px;
-                background-color: white;
-                border: 1px solid #dadce0;
-                border-radius: 8px;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-                z-index: 2147483648;
-                overflow: hidden;
-                pointer-events: none;
-                opacity: 0;
-                transform: scale(0.95);
-                transition: opacity 0.2s ease, transform 0.2s ease;
+                position: fixed !important;
+                width: 250px !important;
+                background-color: white !important;
+                border: 1px solid #dadce0 !important;
+                border-radius: 8px !important;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2) !important;
+                z-index: 2147483648 !important;
+                overflow: hidden !important;
+                pointer-events: none !important;
+                opacity: 0 !important;
+                transform: scale(0.95) !important;
+                transition: opacity 0.2s ease, transform 0.2s ease !important;
+                display: block !important;
+                visibility: visible !important;
             }
             
             .screenshot-preview-container.visible {
-                opacity: 1;
-                transform: scale(1);
+                opacity: 1 !important;
+                transform: scale(1) !important;
+                background-color: red !important;
+                border: 3px solid yellow !important;
             }
             
             .screenshot-preview-image {
