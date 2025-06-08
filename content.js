@@ -1048,10 +1048,13 @@ class SearchOverlay {
             return;
         }
         
-        // Add test screenshot to first result for testing
-        if (results.length > 0 && !results[0].screenshot) {
-            results[0].screenshot = this.generateTestScreenshot();
-        }
+        // Add test screenshot to all results for testing
+        results.forEach((result, index) => {
+            if (!result.screenshot) {
+                result.screenshot = this.generateTestScreenshot();
+                console.log(`Added test screenshot to result ${index}:`, result.title);
+            }
+        });
         
         const html = results.map((result, index) => `
             <div class="search-result" data-url="${result.url}" data-index="${index}">
@@ -1124,8 +1127,12 @@ class SearchOverlay {
                 // Set delay before showing preview (300ms as per PRD)
                 hoverTimeout = setTimeout(() => {
                     const resultData = this.currentResults[index];
+                    console.log(`Hover timeout triggered for result ${index}:`, resultData);
                     if (resultData && resultData.screenshot) {
+                        console.log('Showing screenshot preview for:', resultData.title);
                         this.showScreenshotPreview(resultData.screenshot, result, e);
+                    } else {
+                        console.log('No screenshot available for result:', resultData);
                     }
                 }, 300);
                 
@@ -1302,6 +1309,8 @@ class SearchOverlay {
     
     // Screenshot Preview Functions
     showScreenshotPreview(screenshot, resultDiv, mouseEvent) {
+        console.log('showScreenshotPreview called with:', { screenshot: screenshot ? 'present' : 'missing', mouseEvent });
+        
         // Remove any existing preview
         this.hideScreenshotPreview();
         
