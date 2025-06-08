@@ -361,11 +361,11 @@ class SearchOverlay {
             
             .result-date {
                 font-size: 13px;
-                color: rgba(255, 255, 255, 0.5);
+                color: rgba(255, 255, 255, 0.8);
                 margin-left: 16px;
                 flex-shrink: 0;
                 white-space: nowrap;
-                min-width: 80px;
+                min-width: 120px;
                 text-align: right;
             }
             
@@ -1017,7 +1017,7 @@ class SearchOverlay {
                         <span class="result-url">${this.getSimplifiedUrl(result.url)}</span>
                     </div>
                 </div>
-                <div class="result-date">${this.formatDate(result.lastVisitTime)}</div>
+                <div class="result-date">${this.formatDate(result.visitDate)}</div>
             </div>
         `).join('');
         
@@ -1047,7 +1047,7 @@ class SearchOverlay {
                             <span class="result-url">${this.getSimplifiedUrl(result.url)}</span>
                         </div>
                     </div>
-                    <div class="result-date">${this.formatDate(result.lastVisitTime)}</div>
+                    <div class="result-date">${this.formatDate(result.visitDate)}</div>
                 </div>
             `;
         }).join('');
@@ -1180,9 +1180,17 @@ class SearchOverlay {
     }
     
     formatDate(timestamp) {
-        if (!timestamp) return '';
+        if (!timestamp) {
+            return '';
+        }
         
+        // Handle both timestamp numbers and ISO date strings
         const date = new Date(timestamp);
+        
+        if (isNaN(date.getTime())) {
+            return '';
+        }
+        
         const now = new Date();
         const diffMs = now - date;
         const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -1193,21 +1201,21 @@ class SearchOverlay {
             hour12: false 
         });
         
+        let result;
         if (diffDays === 0) {
-            return timeStr; // Just time for today
+            result = timeStr; // Just time for today
+        } else if (diffDays === 1) {
+            result = `Yesterday - ${timeStr}`;
+        } else {
+            // For older dates: "5 Jun - 21:34"
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const day = date.getDate();
+            const month = monthNames[date.getMonth()];
+            result = `${day} ${month} - ${timeStr}`;
         }
         
-        if (diffDays === 1) {
-            return `Yesterday - ${timeStr}`;
-        }
-        
-        // For older dates: "5 Jun - 21:34"
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const day = date.getDate();
-        const month = monthNames[date.getMonth()];
-        
-        return `${day} ${month} - ${timeStr}`;
+        return result;
     }
     
     escapeHtml(text) {
