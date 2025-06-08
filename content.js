@@ -1324,9 +1324,11 @@ class SearchOverlay {
         `;
         
         document.body.appendChild(previewContainer);
+        console.log('Preview container added to DOM:', previewContainer);
         
         // Position the preview
         this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, 100); // Initial height
+        console.log('Preview positioned at:', previewContainer.style.left, previewContainer.style.top);
         
         // Create image to get natural dimensions
         const img = new Image();
@@ -1347,6 +1349,8 @@ class SearchOverlay {
             // Show with animation
             requestAnimationFrame(() => {
                 previewContainer.classList.add('visible');
+                console.log('Preview made visible, classes:', previewContainer.className);
+                console.log('Preview final position:', previewContainer.style.left, previewContainer.style.top);
             });
         };
         
@@ -1369,6 +1373,14 @@ class SearchOverlay {
         
         // Get mouse position
         const mouseX = mouseEvent.clientX;
+        
+        console.log('Positioning preview:', {
+            mouseX,
+            rowRect,
+            viewportWidth,
+            viewportHeight,
+            imageHeight
+        });
         
         // Calculate position
         const previewWidth = 250;
