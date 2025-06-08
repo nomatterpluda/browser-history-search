@@ -369,6 +369,45 @@ class SearchOverlay {
                 text-align: right;
             }
             
+            /* Screenshot Preview Styles */
+            .screenshot-preview-container {
+                position: fixed;
+                width: 250px;
+                background-color: white;
+                border: 1px solid #dadce0;
+                border-radius: 8px;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+                z-index: 10000;
+                overflow: hidden;
+                pointer-events: none;
+                opacity: 0;
+                transform: scale(0.95);
+                transition: opacity 0.2s ease, transform 0.2s ease;
+            }
+            
+            .screenshot-preview-container.visible {
+                opacity: 1;
+                transform: scale(1);
+            }
+            
+            .screenshot-preview-image {
+                display: block;
+                width: 250px;
+                object-fit: contain;
+                background-color: #f8f9fa;
+                border-radius: 8px;
+            }
+            
+            .screenshot-preview-loading {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100px;
+                color: #5f6368;
+                font-size: 14px;
+                background-color: #f8f9fa;
+            }
+            
             .search-footer {
                 padding: 12px 24px;
                 background: transparent;
@@ -829,6 +868,9 @@ class SearchOverlay {
         this.overlay.classList.remove('visible');
         this.isVisible = false;
         
+        // Hide any screenshot previews
+        this.hideScreenshotPreview();
+        
         setTimeout(() => {
             this.overlay.style.display = 'none';
             document.body.style.overflow = '';
@@ -1006,6 +1048,11 @@ class SearchOverlay {
             return;
         }
         
+        // Add test screenshot to first result for testing
+        if (results.length > 0 && !results[0].screenshot) {
+            results[0].screenshot = this.generateTestScreenshot();
+        }
+        
         const html = results.map((result, index) => `
             <div class="search-result" data-url="${result.url}" data-index="${index}">
                 <div class="result-favicon">
@@ -1061,18 +1108,45 @@ class SearchOverlay {
         results.forEach((result, index) => {
             // Remove existing listeners to avoid duplicates
             result.removeEventListener('mouseenter', result._mouseEnterHandler);
+            result.removeEventListener('mousemove', result._mouseMoveHandler);
             result.removeEventListener('mouseleave', result._mouseLeaveHandler);
             result.removeEventListener('click', result._clickHandler);
             
+            let hoverTimeout;
+            
             // Create new handlers
-            result._mouseEnterHandler = () => {
+            result._mouseEnterHandler = (e) => {
+                // Clear any existing timeout
+                if (hoverTimeout) {
+                    clearTimeout(hoverTimeout);
+                }
+                
+                // Set delay before showing preview (300ms as per PRD)
+                hoverTimeout = setTimeout(() => {
+                    const resultData = this.currentResults[index];
+                    if (resultData && resultData.screenshot) {
+                        this.showScreenshotPreview(resultData.screenshot, result, e);
+                    }
+                }, 300);
+                
                 this.selectedIndex = index;
                 this.updateSelection();
             };
             
+            result._mouseMoveHandler = (e) => {
+                // Update preview position as mouse moves within the row
+                const existingPreview = document.getElementById('screenshot-preview');
+                if (existingPreview && existingPreview.classList.contains('visible')) {
+                    this.updatePreviewPosition(existingPreview, result, e);
+                }
+            };
+            
             result._mouseLeaveHandler = () => {
-                // Only clear selection if mouse leaves the results area entirely
-                // This will be handled by the container mouseleave
+                if (hoverTimeout) {
+                    clearTimeout(hoverTimeout);
+                    hoverTimeout = null;
+                }
+                this.hideScreenshotPreview();
             };
             
             result._clickHandler = () => {
@@ -1081,6 +1155,7 @@ class SearchOverlay {
             
             // Attach new listeners
             result.addEventListener('mouseenter', result._mouseEnterHandler);
+            result.addEventListener('mousemove', result._mouseMoveHandler);
             result.addEventListener('mouseleave', result._mouseLeaveHandler);
             result.addEventListener('click', result._clickHandler);
         });
@@ -1090,6 +1165,7 @@ class SearchOverlay {
         this.resultsContainer._mouseLeaveHandler = () => {
             this.selectedIndex = -1;
             this.updateSelection();
+            this.hideScreenshotPreview();
         };
         this.resultsContainer.addEventListener('mouseleave', this.resultsContainer._mouseLeaveHandler);
     }
@@ -1222,6 +1298,155 @@ class SearchOverlay {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    // Screenshot Preview Functions
+    showScreenshotPreview(screenshot, resultDiv, mouseEvent) {
+        // Remove any existing preview
+        this.hideScreenshotPreview();
+        
+        const previewContainer = document.createElement('div');
+        previewContainer.className = 'screenshot-preview-container';
+        previewContainer.id = 'screenshot-preview';
+        
+        // Show loading state first
+        previewContainer.innerHTML = `
+            <div class="screenshot-preview-loading">Loading preview...</div>
+        `;
+        
+        document.body.appendChild(previewContainer);
+        
+        // Position the preview
+        this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, 100); // Initial height
+        
+        // Create image to get natural dimensions
+        const img = new Image();
+        img.onload = () => {
+            const maxHeight = 200;
+            const displayHeight = Math.min(img.naturalHeight, maxHeight);
+            
+            previewContainer.innerHTML = `
+                <img src="${screenshot}" 
+                     class="screenshot-preview-image"
+                     style="height: ${displayHeight}px;" 
+                     alt="Page preview">
+            `;
+            
+            // Update position with actual image height
+            this.positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, displayHeight);
+            
+            // Show with animation
+            requestAnimationFrame(() => {
+                previewContainer.classList.add('visible');
+            });
+        };
+        
+        img.onerror = () => {
+            previewContainer.innerHTML = `
+                <div class="screenshot-preview-loading">Preview unavailable</div>
+            `;
+            requestAnimationFrame(() => {
+                previewContainer.classList.add('visible');
+            });
+        };
+        
+        img.src = screenshot;
+    }
+    
+    positionPreviewAtMouse(previewContainer, resultDiv, mouseEvent, imageHeight) {
+        const rowRect = resultDiv.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // Get mouse position
+        const mouseX = mouseEvent.clientX;
+        
+        // Calculate position
+        const previewWidth = 250;
+        const previewHeight = imageHeight + 20; // +20px for padding
+        
+        // Horizontal: Right of mouse cursor with small gap
+        let left = mouseX + 15; // 15px gap from cursor
+        
+        // Check if preview would go off-screen on the right
+        if (left + previewWidth > viewportWidth - 10) {
+            // Show on left side of mouse instead
+            left = mouseX - previewWidth - 15;
+        }
+        
+        // Vertical: Align with the row's vertical center
+        const rowCenterY = rowRect.top + (rowRect.height / 2);
+        let top = rowCenterY - (previewHeight / 2);
+        
+        // Ensure preview stays within viewport
+        if (top < 10) {
+            top = 10;
+        } else if (top + previewHeight > viewportHeight - 10) {
+            top = viewportHeight - previewHeight - 10;
+        }
+        
+        // Apply positioning
+        previewContainer.style.left = `${left}px`;
+        previewContainer.style.top = `${top}px`;
+    }
+    
+    updatePreviewPosition(previewContainer, resultDiv, mouseEvent) {
+        const viewportWidth = window.innerWidth;
+        const mouseX = mouseEvent.clientX;
+        
+        // Update horizontal position to follow mouse
+        let left = mouseX + 15;
+        
+        if (left + 250 > viewportWidth - 10) {
+            left = mouseX - 250 - 15;
+        }
+        
+        previewContainer.style.left = `${left}px`;
+        // Keep vertical position aligned with row (don't change top)
+    }
+    
+    hideScreenshotPreview() {
+        const existingPreview = document.getElementById('screenshot-preview');
+        if (existingPreview) {
+            existingPreview.classList.remove('visible');
+            
+            setTimeout(() => {
+                if (existingPreview.parentNode) {
+                    existingPreview.parentNode.removeChild(existingPreview);
+                }
+            }, 200);
+        }
+    }
+    
+    // Generate a test screenshot for development/testing
+    generateTestScreenshot() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 250;
+        canvas.height = 150;
+        const ctx = canvas.getContext('2d');
+        
+        // Create a simple test image
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, 250, 150);
+        
+        ctx.fillStyle = '#4285f4';
+        ctx.fillRect(10, 10, 230, 40);
+        
+        ctx.fillStyle = 'white';
+        ctx.font = '16px Arial';
+        ctx.fillText('Test Website Preview', 20, 35);
+        
+        ctx.fillStyle = '#333';
+        ctx.font = '12px Arial';
+        ctx.fillText('This is a test screenshot preview', 20, 70);
+        ctx.fillText('Hover functionality is working!', 20, 90);
+        
+        ctx.fillStyle = '#ddd';
+        ctx.fillRect(20, 100, 60, 20);
+        ctx.fillRect(90, 100, 60, 20);
+        ctx.fillRect(160, 100, 60, 20);
+        
+        return canvas.toDataURL('image/png', 0.8);
     }
     
     showSettings() {
