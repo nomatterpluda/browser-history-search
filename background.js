@@ -1007,21 +1007,19 @@ async function handleContentExtracted(extractedContent) {
     try {
         console.log('Processing extracted content:', extractedContent.url);
         
-        // Try to capture screenshot if tabId is available
-        if (extractedContent.tabId) {
+        // Store the extracted content first
+        await storeExtractedContent(extractedContent);
+        
+        // Capture screenshot immediately if page is suitable and we have tabId
+        if (extractedContent.tabId && shouldCaptureScreenshot(extractedContent.url)) {
             try {
-                const screenshot = await capturePageScreenshot(extractedContent.tabId);
-                if (screenshot) {
-                    extractedContent.screenshot = screenshot;
-                    console.log('Screenshot captured for:', extractedContent.url);
-                }
+                console.log('Capturing immediate screenshot for:', extractedContent.url);
+                await capturePageScreenshot(extractedContent.tabId, extractedContent.url);
             } catch (screenshotError) {
-                console.log('Could not capture screenshot:', screenshotError.message);
+                console.warn('Immediate screenshot capture failed:', screenshotError.message);
+                // Don't throw - screenshot failure shouldn't break content processing
             }
         }
-        
-        // Store the extracted content for future processing
-        await storeExtractedContent(extractedContent);
         
         // Generate embeddings if OpenAI is configured
         if (openAIService.isReady()) {
@@ -1558,16 +1556,8 @@ async function handlePageVisitTracked(url, timeSpent, tabId) {
         // Check if we should process this page for AI embeddings
         await checkAndProcessPageForAI(url, timeSpent);
         
-        // Capture screenshot if page visit was significant (30+ seconds)
-        if (timeSpent >= 30000 && tabId && shouldCaptureScreenshot(url)) {
-            try {
-                console.log('Capturing screenshot for significant page visit:', url);
-                await capturePageScreenshot(tabId, url);
-            } catch (screenshotError) {
-                console.warn('Screenshot capture failed:', screenshotError.message);
-                // Don't throw - screenshot failure shouldn't break page visit tracking
-            }
-        }
+        // Check if we should keep the screenshot based on visit criteria
+        await handleScreenshotRetention(url, timeSpent);
         
     } catch (error) {
         console.error('Error handling page visit tracking:', error);
@@ -1575,7 +1565,53 @@ async function handlePageVisitTracked(url, timeSpent, tabId) {
     }
 }
 
-// Determine if we should capture a screenshot for this URL
+// Handle screenshot retention based on visit criteria
+async function handleScreenshotRetention(url, timeSpent) {
+    try {
+        // Check if we have a screenshot for this URL
+        const screenshot = await getScreenshotForUrl(url);
+        if (!screenshot) {
+            return; // No screenshot to evaluate
+        }
+        
+        // Check if visit meets retention criteria
+        const shouldKeep = await shouldKeepScreenshot(url, timeSpent);
+        
+        if (shouldKeep) {
+            console.log(`Keeping screenshot for ${url} (${timeSpent}ms visit)`);
+        } else {
+            // Remove screenshot that doesn't meet criteria
+            const screenshotKey = `screenshot_${btoa(url).replace(/[/+=]/g, '_')}`;
+            await chrome.storage.local.remove([screenshotKey]);
+            console.log(`Discarded screenshot for ${url} (${timeSpent}ms visit, didn't meet criteria)`);
+        }
+        
+    } catch (error) {
+        console.error('Error handling screenshot retention:', error);
+    }
+}
+
+// Determine if we should keep a screenshot based on visit criteria
+async function shouldKeepScreenshot(url, timeSpent) {
+    // Must visit for at least 15 seconds
+    if (timeSpent < 15000) {
+        return false;
+    }
+    
+    // Check content length (must be 500+ characters)
+    const storedContent = await getStoredContentForUrl(url);
+    if (!storedContent || !storedContent.content) {
+        return false; // No content available
+    }
+    
+    if (storedContent.content.length < 500) {
+        return false; // Content too short
+    }
+    
+    return true;
+}
+
+// Determine if we should capture a screenshot for this URL (immediate capture)
 function shouldCaptureScreenshot(url) {
     // Skip invalid URLs
     if (!isValidUrlForContentScript(url)) {
@@ -1656,8 +1692,8 @@ function shouldEmbedPage(pageData) {
     const timeSpent = pageData.timeSpent || 0;
     const wordCount = pageData.wordCount || 0;
     
-    // Must spend at least 30 seconds on page
-    if (timeSpent < 30000) {
+    // Must spend at least 15 seconds on page
+    if (timeSpent < 15000) {
         return false;
     }
     

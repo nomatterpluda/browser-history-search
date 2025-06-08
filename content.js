@@ -97,7 +97,7 @@ class SearchOverlay {
                                  <div class="setting-toggle-info">
                                      <label for="ai-optimization-toggle">Smart AI Processing</label>
                                      <p class="setting-description">
-                                         Process only meaningful pages (30s+ visit, 500+ words). Reduces costs by ~90%.
+                                         Process only meaningful pages (15s+ visit, 500+ words). Reduces costs by ~90%.
                                      </p>
                                  </div>
                                  <label class="ios-toggle">
@@ -1980,7 +1980,7 @@ window.addEventListener('beforeunload', () => {
 document.addEventListener('visibilitychange', () => {
     if (document.hidden && !pageVisitTracked) {
         const timeSpent = Date.now() - pageVisitStartTime;
-        if (timeSpent > 30000) { // Only track if spent more than 30 seconds
+        if (timeSpent > 15000) { // Only track if spent more than 15 seconds
             // Get current tab ID and send with page visit data
             chrome.runtime.sendMessage({
                 type: 'GET_CURRENT_TAB_ID'
@@ -2015,8 +2015,8 @@ function shouldEmbedPage(pageData) {
     const timeSpent = pageData.timeSpent || 0;
     const wordCount = pageData.wordCount || 0;
     
-    // Must spend at least 30 seconds on page
-    if (timeSpent < 30000) {
+    // Must spend at least 15 seconds on page
+    if (timeSpent < 15000) {
         return false;
     }
     
